@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Include">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Include\vm">
+      <UniqueIdentifier>{1fb01a15-bac1-40fd-ab8b-518343eab16c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\windows">
+      <UniqueIdentifier>{21d60907-6712-41e7-8758-d6cd84713239}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\lib/hv">
+      <UniqueIdentifier>{0fbb784a-e446-4ef4-a4f5-1cfabc9b2e32}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\inc\vm\vm.h">
+      <Filter>Include\vm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\lib\hv\minimal.h">
+      <Filter>Source\lib/hv</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\vm\windows\vm.c">
+      <Filter>Source\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\vm\libmain.c">
+      <Filter>Source</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
