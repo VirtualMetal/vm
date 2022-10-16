@@ -1,0 +1,7 @@
+EXPORTS
+	VmCreate
+	VmDelete
+	VmSetDebugLog
+	VmStartDispatcher
+	VmWaitDispatcher
+	VmStopDispatcher

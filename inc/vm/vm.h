@@ -78,6 +78,7 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance);
 VmResult VmDelete(Vm *Instance);
 VmResult VmSetDebugLog(Vm *Instance, unsigned Flags);
 VmResult VmStartDispatcher(Vm *Instance);
+VmResult VmWaitDispatcher(Vm *Instance);
 VmResult VmStopDispatcher(Vm *Instance);
 
 #ifdef __cplusplus

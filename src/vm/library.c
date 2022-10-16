@@ -1,5 +1,5 @@
 /**
- * @file vm/libmain.c
+ * @file vm/library.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */

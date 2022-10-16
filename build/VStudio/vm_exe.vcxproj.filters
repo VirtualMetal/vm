@@ -31,7 +31,7 @@
     <ClCompile Include="..\..\src\vm\windows\vm.c">
       <Filter>Source\windows</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\vm\exemain.c">
+    <ClCompile Include="..\..\src\vm\program.c">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>

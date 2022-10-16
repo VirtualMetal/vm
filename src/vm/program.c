@@ -1,5 +1,5 @@
 /**
- * @file vm/exemain.c
+ * @file vm/program.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */
@@ -61,8 +61,7 @@ int vmrun(int argc, char **argv)
 	if (VmResultSuccess != Result)
 		goto exit;
 
-	// !!!: REVISIT
-	Sleep(INFINITE);
+	VmWaitDispatcher(Instance);
 
 	VmStopDispatcher(Instance);
 

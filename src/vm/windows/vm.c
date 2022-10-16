@@ -26,12 +26,13 @@ struct Vm
     UINT32 DispatcherThreadCount;
 };
 
+static VmResult VmWaitDispatcherEx(Vm *Instance, BOOL Cancel);
+static VOID VmCancelDispatcher(Vm *Instance);
 static DWORD WINAPI VmDispatcherThread(PVOID Instance0);
-static VOID VmCancelDispatch(Vm *Instance);
-static VmResult VmDispatchUnknown(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VmResult VmDispatchMemoryAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VmResult VmDispatchX64IoPortAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VmResult VmDispatchCanceled(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
+static VmResult VmDispatcherUnknown(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
+static VmResult VmDispatcherMemoryAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
+static VmResult VmDispatcherX64IoPortAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
+static VmResult VmDispatcherCanceled(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
 static VOID VmDebugLog(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext, VmResult Result);
 
 VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
@@ -131,6 +132,9 @@ exit:
 
 VmResult VmDelete(Vm *Instance)
 {
+    if (0 != Instance->DispatcherThread)
+        CloseHandle(Instance->DispatcherThread);
+
     if (Instance->MemoryMapped)
         WHvUnmapGpaRange(Instance->Partition, 0, Instance->Config.MemorySize);
 
@@ -176,7 +180,17 @@ exit:
     return Result;
 }
 
+VmResult VmWaitDispatcher(Vm *Instance)
+{
+    return VmWaitDispatcherEx(Instance, FALSE);
+}
+
 VmResult VmStopDispatcher(Vm *Instance)
+{
+    return VmWaitDispatcherEx(Instance, TRUE);
+}
+
+static VmResult VmWaitDispatcherEx(Vm *Instance, BOOL Cancel)
 {
     VmResult Result;
 
@@ -186,16 +200,22 @@ VmResult VmStopDispatcher(Vm *Instance)
         goto exit;
     }
 
-    VmCancelDispatch(Instance);
+    if (Cancel)
+        VmCancelDispatcher(Instance);
 
     WaitForSingleObject(Instance->DispatcherThread, INFINITE);
-    CloseHandle(Instance->DispatcherThread);
-    Instance->DispatcherThread = 0;
 
     Result = VmResultSuccess;
 
 exit:
     return Result;
+}
+
+static VOID VmCancelDispatcher(Vm *Instance)
+{
+    for (UINT32 CpuIndex = (UINT32)Instance->Config.CpuCount - 1;
+        Instance->Config.CpuCount > CpuIndex; CpuIndex--)
+        WHvCancelRunVirtualProcessor(Instance->Partition, CpuIndex, 0);
 }
 
 static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
@@ -254,74 +274,74 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
 #define SQUASH(x)                       ((((x) & 0x3000) >> 8) | ((x) & 0xf))
         static VmResult (*Dispatch[64])(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext) =
         {
-            [0x00] = VmDispatchUnknown,
-            [0x01] = VmDispatchUnknown,
-            [0x02] = VmDispatchUnknown,
-            [0x03] = VmDispatchUnknown,
-            [0x04] = VmDispatchUnknown,
-            [0x05] = VmDispatchUnknown,
-            [0x06] = VmDispatchUnknown,
-            [0x07] = VmDispatchUnknown,
-            [0x08] = VmDispatchUnknown,
-            [0x09] = VmDispatchUnknown,
-            [0x0a] = VmDispatchUnknown,
-            [0x0b] = VmDispatchUnknown,
-            [0x0c] = VmDispatchUnknown,
-            [0x0d] = VmDispatchUnknown,
-            [0x0e] = VmDispatchUnknown,
-            [0x0f] = VmDispatchUnknown,
-            [0x10] = VmDispatchUnknown,
-            [0x11] = VmDispatchUnknown,
-            [0x12] = VmDispatchUnknown,
-            [0x13] = VmDispatchUnknown,
-            [0x14] = VmDispatchUnknown,
-            [0x15] = VmDispatchUnknown,
-            [0x16] = VmDispatchUnknown,
-            [0x17] = VmDispatchUnknown,
-            [0x18] = VmDispatchUnknown,
-            [0x19] = VmDispatchUnknown,
-            [0x1a] = VmDispatchUnknown,
-            [0x1b] = VmDispatchUnknown,
-            [0x1c] = VmDispatchUnknown,
-            [0x1d] = VmDispatchUnknown,
-            [0x1e] = VmDispatchUnknown,
-            [0x1f] = VmDispatchUnknown,
-            [0x20] = VmDispatchUnknown,
-            [0x21] = VmDispatchUnknown,
-            [0x22] = VmDispatchUnknown,
-            [0x23] = VmDispatchUnknown,
-            [0x24] = VmDispatchUnknown,
-            [0x25] = VmDispatchUnknown,
-            [0x26] = VmDispatchUnknown,
-            [0x27] = VmDispatchUnknown,
-            [0x28] = VmDispatchUnknown,
-            [0x29] = VmDispatchUnknown,
-            [0x2a] = VmDispatchUnknown,
-            [0x2b] = VmDispatchUnknown,
-            [0x2c] = VmDispatchUnknown,
-            [0x2d] = VmDispatchUnknown,
-            [0x2e] = VmDispatchUnknown,
-            [0x2f] = VmDispatchUnknown,
-            [0x30] = VmDispatchUnknown,
-            [0x31] = VmDispatchUnknown,
-            [0x32] = VmDispatchUnknown,
-            [0x33] = VmDispatchUnknown,
-            [0x34] = VmDispatchUnknown,
-            [0x35] = VmDispatchUnknown,
-            [0x36] = VmDispatchUnknown,
-            [0x37] = VmDispatchUnknown,
-            [0x38] = VmDispatchUnknown,
-            [0x39] = VmDispatchUnknown,
-            [0x3a] = VmDispatchUnknown,
-            [0x3b] = VmDispatchUnknown,
-            [0x3c] = VmDispatchUnknown,
-            [0x3d] = VmDispatchUnknown,
-            [0x3e] = VmDispatchUnknown,
-            [0x3f] = VmDispatchUnknown,
+            [0x00] = VmDispatcherUnknown,
+            [0x01] = VmDispatcherUnknown,
+            [0x02] = VmDispatcherUnknown,
+            [0x03] = VmDispatcherUnknown,
+            [0x04] = VmDispatcherUnknown,
+            [0x05] = VmDispatcherUnknown,
+            [0x06] = VmDispatcherUnknown,
+            [0x07] = VmDispatcherUnknown,
+            [0x08] = VmDispatcherUnknown,
+            [0x09] = VmDispatcherUnknown,
+            [0x0a] = VmDispatcherUnknown,
+            [0x0b] = VmDispatcherUnknown,
+            [0x0c] = VmDispatcherUnknown,
+            [0x0d] = VmDispatcherUnknown,
+            [0x0e] = VmDispatcherUnknown,
+            [0x0f] = VmDispatcherUnknown,
+            [0x10] = VmDispatcherUnknown,
+            [0x11] = VmDispatcherUnknown,
+            [0x12] = VmDispatcherUnknown,
+            [0x13] = VmDispatcherUnknown,
+            [0x14] = VmDispatcherUnknown,
+            [0x15] = VmDispatcherUnknown,
+            [0x16] = VmDispatcherUnknown,
+            [0x17] = VmDispatcherUnknown,
+            [0x18] = VmDispatcherUnknown,
+            [0x19] = VmDispatcherUnknown,
+            [0x1a] = VmDispatcherUnknown,
+            [0x1b] = VmDispatcherUnknown,
+            [0x1c] = VmDispatcherUnknown,
+            [0x1d] = VmDispatcherUnknown,
+            [0x1e] = VmDispatcherUnknown,
+            [0x1f] = VmDispatcherUnknown,
+            [0x20] = VmDispatcherUnknown,
+            [0x21] = VmDispatcherUnknown,
+            [0x22] = VmDispatcherUnknown,
+            [0x23] = VmDispatcherUnknown,
+            [0x24] = VmDispatcherUnknown,
+            [0x25] = VmDispatcherUnknown,
+            [0x26] = VmDispatcherUnknown,
+            [0x27] = VmDispatcherUnknown,
+            [0x28] = VmDispatcherUnknown,
+            [0x29] = VmDispatcherUnknown,
+            [0x2a] = VmDispatcherUnknown,
+            [0x2b] = VmDispatcherUnknown,
+            [0x2c] = VmDispatcherUnknown,
+            [0x2d] = VmDispatcherUnknown,
+            [0x2e] = VmDispatcherUnknown,
+            [0x2f] = VmDispatcherUnknown,
+            [0x30] = VmDispatcherUnknown,
+            [0x31] = VmDispatcherUnknown,
+            [0x32] = VmDispatcherUnknown,
+            [0x33] = VmDispatcherUnknown,
+            [0x34] = VmDispatcherUnknown,
+            [0x35] = VmDispatcherUnknown,
+            [0x36] = VmDispatcherUnknown,
+            [0x37] = VmDispatcherUnknown,
+            [0x38] = VmDispatcherUnknown,
+            [0x39] = VmDispatcherUnknown,
+            [0x3a] = VmDispatcherUnknown,
+            [0x3b] = VmDispatcherUnknown,
+            [0x3c] = VmDispatcherUnknown,
+            [0x3d] = VmDispatcherUnknown,
+            [0x3e] = VmDispatcherUnknown,
+            [0x3f] = VmDispatcherUnknown,
 
-            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = VmDispatchMemoryAccess,
-            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = VmDispatchX64IoPortAccess,
-            [SQUASH(WHvRunVpExitReasonCanceled)] = VmDispatchCanceled,
+            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = VmDispatcherMemoryAccess,
+            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = VmDispatcherX64IoPortAccess,
+            [SQUASH(WHvRunVpExitReasonCanceled)] = VmDispatcherCanceled,
         };
         int Index = SQUASH(ExitContext.ExitReason);
 #undef SQUASH
@@ -334,7 +354,7 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
     }
 
 exit:
-    VmCancelDispatch(Instance);
+    VmCancelDispatcher(Instance);
 
     if (CpuCreated)
         WHvDeleteVirtualProcessor(Instance->Partition, CpuIndex);
@@ -348,29 +368,22 @@ exit:
     return (DWORD)Result;
 }
 
-static VOID VmCancelDispatch(Vm *Instance)
-{
-    for (UINT32 CpuIndex = (UINT32)Instance->Config.CpuCount - 1;
-        Instance->Config.CpuCount > CpuIndex; CpuIndex--)
-        WHvCancelRunVirtualProcessor(Instance->Partition, CpuIndex, 0);
-}
-
-static VmResult VmDispatchUnknown(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static VmResult VmDispatcherUnknown(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
 {
     return VmErrorStop;
 }
 
-static VmResult VmDispatchMemoryAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static VmResult VmDispatcherMemoryAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
 {
-    return VmResultSuccess;
+    return VmErrorStop;
 }
 
-static VmResult VmDispatchX64IoPortAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static VmResult VmDispatcherX64IoPortAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
 {
-    return VmResultSuccess;
+    return VmErrorStop;
 }
 
-static VmResult VmDispatchCanceled(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static VmResult VmDispatcherCanceled(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
 {
     return VmErrorStop;
 }

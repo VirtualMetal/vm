@@ -15,8 +15,11 @@
     <ClInclude Include="..\..\src\lib\hv\minimal.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\libmain.c" />
+    <ClCompile Include="..\..\src\vm\library.c" />
     <ClCompile Include="..\..\src\vm\windows\vm.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\vm\library.def" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
@@ -83,6 +86,7 @@
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(OutDir)$(TargetFileName).map</MapFileName>
+      <ModuleDefinitionFile>..\..\src\vm\library.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -108,6 +112,7 @@
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(OutDir)$(TargetFileName).map</MapFileName>
+      <ModuleDefinitionFile>..\..\src\vm\library.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

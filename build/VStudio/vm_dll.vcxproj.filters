@@ -31,8 +31,13 @@
     <ClCompile Include="..\..\src\vm\windows\vm.c">
       <Filter>Source\windows</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\vm\libmain.c">
+    <ClCompile Include="..\..\src\vm\library.c">
       <Filter>Source</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\vm\library.def">
+      <Filter>Source</Filter>
+    </None>
   </ItemGroup>
 </Project>
