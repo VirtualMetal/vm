@@ -49,14 +49,14 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
         WHvCapabilityCodeHypervisorPresent, &Capability, sizeof Capability, 0);
     if (FAILED(HResult) || !Capability.HypervisorPresent)
     {
-        Result = VmMakeResult(HResult, VmErrorHypervisor);
+        Result = VmMakeResult(VmErrorHypervisor, HResult);
         goto exit;
     }
 
     Instance = malloc(sizeof *Instance);
     if (0 == Instance)
     {
-        Result = VmMakeResult(ERROR_OUTOFMEMORY, VmErrorMemory);
+        Result = VmErrorMemory;
         goto exit;
     }
 
@@ -69,7 +69,7 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
 
         if (!GetProcessAffinityMask(GetCurrentProcess(), &ProcessMask, &SystemMask))
         {
-            Result = VmMakeResult(GetLastError(), VmErrorInstance);
+            Result = VmMakeResult(VmErrorInstance, GetLastError());
             goto exit;
         }
 
@@ -82,7 +82,7 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
     HResult = WHvCreatePartition(&Instance->Partition);
     if (FAILED(HResult))
     {
-        Result = VmMakeResult(HResult, VmErrorInstance);
+        Result = VmMakeResult(VmErrorInstance, HResult);
         goto exit;
     }
 
@@ -91,14 +91,14 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
         WHvPartitionPropertyCodeProcessorCount, &Property, sizeof Property);
     if (FAILED(HResult))
     {
-        Result = VmMakeResult(HResult, VmErrorInstance);
+        Result = VmMakeResult(VmErrorInstance, HResult);
         goto exit;
     }
 
     HResult = WHvSetupPartition(Instance->Partition);
     if (FAILED(HResult))
     {
-        Result = VmMakeResult(HResult, VmErrorInstance);
+        Result = VmMakeResult(VmErrorInstance, HResult);
         goto exit;
     }
 
@@ -106,7 +106,7 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
         0, Instance->Config.MemorySize, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (0 == Instance->Memory)
     {
-        Result = VmMakeResult(GetLastError(), VmErrorInstance);
+        Result = VmMakeResult(VmErrorInstance, GetLastError());
         goto exit;
     }
 
@@ -115,7 +115,7 @@ VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
         WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
     if (FAILED(HResult))
     {
-        Result = VmMakeResult(HResult, VmErrorMemory);
+        Result = VmMakeResult(VmErrorMemory, HResult);
         goto exit;
     }
     Instance->MemoryMapped = TRUE;
@@ -162,7 +162,7 @@ VmResult VmStartDispatcher(Vm *Instance)
 
     if (0 != Instance->DispatcherThread)
     {
-        Result = VmMakeResult(0, VmErrorInvalid);
+        Result = VmErrorInvalid;
         goto exit;
     }
 
@@ -170,7 +170,7 @@ VmResult VmStartDispatcher(Vm *Instance)
     Instance->DispatcherThread = CreateThread(0, 0, VmDispatcherThread, Instance, 0, 0);
     if (0 == Instance->DispatcherThread)
     {
-        Result = VmMakeResult(GetLastError(), VmErrorThread);
+        Result = VmMakeResult(VmErrorThread, GetLastError());
         goto exit;
     }
 
@@ -196,7 +196,7 @@ static VmResult VmWaitDispatcherEx(Vm *Instance, BOOL Cancel)
 
     if (0 == Instance->DispatcherThread)
     {
-        Result = VmMakeResult(0, VmErrorInvalid);
+        Result = VmErrorInvalid;
         goto exit;
     }
 
@@ -241,7 +241,7 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
         DispatcherThread = CreateThread(0, 0, VmDispatcherThread, Instance, 0, 0);
         if (0 == DispatcherThread)
         {
-            Result = VmMakeResult(GetLastError(), VmErrorThread);
+            Result = VmMakeResult(VmErrorThread, GetLastError());
             goto exit;
         }
     }
@@ -249,7 +249,7 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
     HResult = WHvCreateVirtualProcessor(Instance->Partition, CpuIndex, 0);
     if (FAILED(HResult))
     {
-        Result = VmMakeResult(HResult, VmErrorCpu);
+        Result = VmMakeResult(VmErrorCpu, HResult);
         goto exit;
     }
     CpuCreated = TRUE;
@@ -260,7 +260,7 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
             CpuIndex, &ExitContext, sizeof ExitContext);
         if (FAILED(HResult))
         {
-            Result = VmMakeResult(HResult, VmErrorCpu);
+            Result = VmMakeResult(VmErrorCpu, HResult);
             goto exit;
         }
 

@@ -18,13 +18,41 @@
 extern "C" {
 #endif
 
-typedef int VmError;
+typedef long long VmResult;
 typedef int VmReason;
-typedef unsigned long long VmResult;
-typedef unsigned long long VmCount;
+
+#define VmResultSuccess                 ((VmResult)0)
+#define VmErrorNotImpl                  ((VmResult)-1LL<<32)    /* not implemented */
+#define VmErrorInvalid                  ((VmResult)-2LL<<32)    /* invalid use (e.g. invalid args) */
+#define VmErrorMemory                   ((VmResult)-3LL<<32)    /* memory error (e.g. out of memory) */
+#define VmErrorHypervisor               ((VmResult)-4LL<<32)    /* hypervisor error (e.g. not present) */
+#define VmErrorInstance                 ((VmResult)-5LL<<32)    /* instance error (e.g. cannot create) */
+#define VmErrorThread                   ((VmResult)-6LL<<32)    /* thread error (e.g. cannot create) */
+#define VmErrorCpu                      ((VmResult)-7LL<<32)    /* cpu error (e.g. cannot create) */
+#define VmErrorStop                     ((VmResult)-8LL<<32)    /* stop processing */
+
+static inline
+VmResult VmMakeResult(VmResult Error, VmReason Reason)
+{
+    return Error | (VmResult)(unsigned)Reason;
+}
+
+static inline
+VmResult VmGetError(VmResult Result)
+{
+    return Result & 0xffffffff00000000ULL;
+}
+
+static inline
+VmReason VmGetReason(VmResult Result)
+{
+    return (VmReason)Result;
+}
+
 typedef struct Vm Vm;
 typedef struct VmConfig VmConfig;
 typedef struct VmInterface VmInterface;
+typedef unsigned long long VmCount;
 
 struct VmConfig
 {
@@ -42,37 +70,6 @@ struct VmInterface
 
     VmResult (*Reserved[30])();
 };
-
-enum
-{
-    VmResultSuccess                     = 0,
-    VmErrorNotImpl                      = -1,   /* not implemented */
-    VmErrorInvalid                      = -2,   /* invalid use (e.g. invalid args) */
-    VmErrorMemory                       = -3,   /* memory error (e.g. out of memory) */
-    VmErrorHypervisor                   = -4,   /* hypervisor error (e.g. not present) */
-    VmErrorInstance                     = -5,   /* instance error (e.g. cannot create) */
-    VmErrorThread                       = -6,   /* thread error (e.g. cannot create) */
-    VmErrorCpu                          = -7,   /* cpu error (e.g. cannot create) */
-    VmErrorStop                         = -8,   /* stop processing */
-};
-
-static inline
-VmResult VmMakeResult(VmReason Reason, VmError Error)
-{
-    return ((VmResult)Reason << 32) | (VmResult)Error;
-}
-
-static inline
-VmError VmGetError(VmResult Result)
-{
-    return (VmError)Result;
-}
-
-static inline
-VmReason VmGetReason(VmResult Result)
-{
-    return (VmReason)(Result >> 32);
-}
 
 VmResult VmCreate(const VmConfig *Config, Vm **PInstance);
 VmResult VmDelete(Vm *Instance);
