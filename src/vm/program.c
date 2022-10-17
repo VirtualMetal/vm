@@ -16,33 +16,33 @@
 
 static int vmrun(int argc, char **argv)
 {
-	VmResult Result;
-	VmConfig Config;
-	Vm *Instance = 0;
+	vm_result_t result;
+	vm_config_t config;
+	vm_t *instance = 0;
 
-	memset(&Config, 0, sizeof Config);
-	Config.CpuCount = 1;
-	Config.MemorySize = 4096;
+	memset(&config, 0, sizeof config);
+	config.cpu_count = 1;
+	config.memory_size = 4096;
 
-	Result = VmCreate(&Config, &Instance);
-	if (VmResultSuccess != Result)
+	result = vm_create(&config, &instance);
+	if (VM_RESULT_SUCCESS != result)
 		goto exit;
 
-	VmSetDebugLog(Instance, (unsigned)-1);
+	vm_set_debug_log(instance, (unsigned)-1);
 
-	Result = VmStartDispatcher(Instance);
-	if (VmResultSuccess != Result)
+	result = vm_start_dispatcher(instance);
+	if (VM_RESULT_SUCCESS != result)
 		goto exit;
 
-	VmWaitDispatcher(Instance);
+	vm_wait_dispatcher(instance);
 
-	VmStopDispatcher(Instance);
+	vm_stop_dispatcher(instance);
 
 exit:
-	if (0 != Instance)
-		VmDelete(Instance);
+	if (0 != instance)
+		vm_delete(instance);
 
-	return VmResultSuccess == Result ? 0 : 1;
+	return VM_RESULT_SUCCESS == result ? 0 : 1;
 }
 
 int main(int argc, char **argv)

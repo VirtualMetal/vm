@@ -15,218 +15,218 @@
 #include <vm/internal.h>
 #include <winhvplatform.h>
 
-struct Vm
+struct vm
 {
-    VmConfig Config;
-    WHV_PARTITION_HANDLE Partition;
-    PVOID Memory;
-    BOOL MemoryMapped;
-    UINT32 DebugLogFlags;
-    HANDLE DispatcherThread;
-    UINT32 DispatcherThreadCount;
+    vm_config_t config;
+    WHV_PARTITION_HANDLE partition;
+    PVOID memory;
+    BOOL memory_mapped;
+    UINT32 debug_log_flags;
+    HANDLE dispatcher_thread;
+    UINT32 dispatcher_thread_count;
 };
 
-static VmResult VmWaitDispatcherEx(Vm *Instance, BOOL Cancel);
-static VOID VmCancelDispatcher(Vm *Instance);
-static DWORD WINAPI VmDispatcherThread(PVOID Instance0);
-static VmResult VmDispatcherUnknown(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VmResult VmDispatcherMemoryAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VmResult VmDispatcherX64IoPortAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VmResult VmDispatcherCanceled(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext);
-static VOID VmDebugLog(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext, VmResult Result);
+static vm_result_t vm_wait_dispatcher_ex(vm_t *instance, BOOL cancel);
+static VOID vm_cancel_dispatcher(vm_t *instance);
+static DWORD WINAPI vm_dispatcher_thread(PVOID instance0);
+static vm_result_t vm_dispatcher_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_dispatcher_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_dispatcher_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_dispatcher_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static VOID vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
 
-VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
+vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
-    VmResult Result;
-    Vm *Instance = 0;
-    WHV_PARTITION_PROPERTY Property = { 0 };
-    WHV_CAPABILITY Capability;
-    HRESULT HResult;
+    vm_result_t result;
+    vm_t *instance = 0;
+    WHV_PARTITION_PROPERTY property = { 0 };
+    WHV_CAPABILITY capability;
+    HRESULT hresult;
 
-    *PInstance = 0;
+    *pinstance = 0;
 
-    HResult = WHvGetCapability(
-        WHvCapabilityCodeHypervisorPresent, &Capability, sizeof Capability, 0);
-    if (FAILED(HResult) || !Capability.HypervisorPresent)
+    hresult = WHvGetCapability(
+        WHvCapabilityCodeHypervisorPresent, &capability, sizeof capability, 0);
+    if (FAILED(hresult) || !capability.HypervisorPresent)
     {
-        Result = VmMakeResult(VmErrorHypervisor, HResult);
+        result = vm_make_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
     }
 
-    Instance = malloc(sizeof *Instance);
-    if (0 == Instance)
+    instance = malloc(sizeof *instance);
+    if (0 == instance)
     {
-        Result = VmErrorMemory;
+        result = VM_ERROR_MEMORY;
         goto exit;
     }
 
-    memset(Instance, 0, sizeof *Instance);
-    Instance->Config = *Config;
+    memset(instance, 0, sizeof *instance);
+    instance->config = *config;
 
-    if (0 == Instance->Config.CpuCount)
+    if (0 == instance->config.cpu_count)
     {
-        DWORD_PTR ProcessMask, SystemMask;
+        DWORD_PTR process_mask, system_mask;
 
-        if (!GetProcessAffinityMask(GetCurrentProcess(), &ProcessMask, &SystemMask))
+        if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
         {
-            Result = VmMakeResult(VmErrorInstance, GetLastError());
+            result = vm_make_result(VM_ERROR_INSTANCE, GetLastError());
             goto exit;
         }
 
-        for (Instance->Config.CpuCount = 0; 0 != ProcessMask; ProcessMask >>= 1)
-            Instance->Config.CpuCount += ProcessMask & 1;
+        for (instance->config.cpu_count = 0; 0 != process_mask; process_mask >>= 1)
+            instance->config.cpu_count += process_mask & 1;
     }
-    if (0 == Instance->Config.CpuCount)
-        Instance->Config.CpuCount = 1;
+    if (0 == instance->config.cpu_count)
+        instance->config.cpu_count = 1;
 
-    HResult = WHvCreatePartition(&Instance->Partition);
-    if (FAILED(HResult))
+    hresult = WHvCreatePartition(&instance->partition);
+    if (FAILED(hresult))
     {
-        Result = VmMakeResult(VmErrorInstance, HResult);
+        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
 
-    Property.ProcessorCount = (UINT32)Instance->Config.CpuCount;
-    HResult = WHvSetPartitionProperty(Instance->Partition,
-        WHvPartitionPropertyCodeProcessorCount, &Property, sizeof Property);
-    if (FAILED(HResult))
+    property.ProcessorCount = (UINT32)instance->config.cpu_count;
+    hresult = WHvSetPartitionProperty(instance->partition,
+        WHvPartitionPropertyCodeProcessorCount, &property, sizeof property);
+    if (FAILED(hresult))
     {
-        Result = VmMakeResult(VmErrorInstance, HResult);
+        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
 
-    HResult = WHvSetupPartition(Instance->Partition);
-    if (FAILED(HResult))
+    hresult = WHvSetupPartition(instance->partition);
+    if (FAILED(hresult))
     {
-        Result = VmMakeResult(VmErrorInstance, HResult);
+        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
 
-    Instance->Memory = VirtualAlloc(
-        0, Instance->Config.MemorySize, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-    if (0 == Instance->Memory)
+    instance->memory = VirtualAlloc(
+        0, instance->config.memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if (0 == instance->memory)
     {
-        Result = VmMakeResult(VmErrorInstance, GetLastError());
+        result = vm_make_result(VM_ERROR_INSTANCE, GetLastError());
         goto exit;
     }
 
-    HResult = WHvMapGpaRange(Instance->Partition,
-        Instance->Memory, 0, Instance->Config.MemorySize,
+    hresult = WHvMapGpaRange(instance->partition,
+        instance->memory, 0, instance->config.memory_size,
         WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
-    if (FAILED(HResult))
+    if (FAILED(hresult))
     {
-        Result = VmMakeResult(VmErrorMemory, HResult);
+        result = vm_make_result(VM_ERROR_MEMORY, hresult);
         goto exit;
     }
-    Instance->MemoryMapped = TRUE;
+    instance->memory_mapped = TRUE;
 
-    *PInstance = Instance;
-    Result = VmResultSuccess;
+    *pinstance = instance;
+    result = VM_RESULT_SUCCESS;
 
 exit:
-    if (VmResultSuccess != Result && 0 != Instance)
-        VmDelete(Instance);
+    if (VM_RESULT_SUCCESS != result && 0 != instance)
+        vm_delete(instance);
 
-    return Result;
+    return result;
 }
 
-VmResult VmDelete(Vm *Instance)
+vm_result_t vm_delete(vm_t *instance)
 {
-    if (0 != Instance->DispatcherThread)
-        CloseHandle(Instance->DispatcherThread);
+    if (0 != instance->dispatcher_thread)
+        CloseHandle(instance->dispatcher_thread);
 
-    if (Instance->MemoryMapped)
-        WHvUnmapGpaRange(Instance->Partition, 0, Instance->Config.MemorySize);
+    if (instance->memory_mapped)
+        WHvUnmapGpaRange(instance->partition, 0, instance->config.memory_size);
 
-    if (0 != Instance->Memory)
-        VirtualFree(Instance->Memory, Instance->Config.MemorySize, MEM_RELEASE);
+    if (0 != instance->memory)
+        VirtualFree(instance->memory, instance->config.memory_size, MEM_RELEASE);
 
-    if (0 != Instance->Partition)
-        WHvDeletePartition(Instance->Partition);
+    if (0 != instance->partition)
+        WHvDeletePartition(instance->partition);
 
-    free(Instance);
+    free(instance);
 
-    return VmResultSuccess;
+    return VM_RESULT_SUCCESS;
 }
 
-VmResult VmSetDebugLog(Vm *Instance, unsigned Flags)
+vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
 {
-    Instance->DebugLogFlags = Flags;
+    instance->debug_log_flags = flags;
 
-    return VmResultSuccess;
+    return VM_RESULT_SUCCESS;
 }
 
-VmResult VmStartDispatcher(Vm *Instance)
+vm_result_t vm_start_dispatcher(vm_t *instance)
 {
-    VmResult Result;
+    vm_result_t result;
 
-    if (0 != Instance->DispatcherThread)
+    if (0 != instance->dispatcher_thread)
     {
-        Result = VmErrorInvalid;
+        result = VM_ERROR_MISUSE;
         goto exit;
     }
 
-    Instance->DispatcherThreadCount = (UINT32)Instance->Config.CpuCount;
-    Instance->DispatcherThread = CreateThread(0, 0, VmDispatcherThread, Instance, 0, 0);
-    if (0 == Instance->DispatcherThread)
+    instance->dispatcher_thread_count = (UINT32)instance->config.cpu_count;
+    instance->dispatcher_thread = CreateThread(0, 0, vm_dispatcher_thread, instance, 0, 0);
+    if (0 == instance->dispatcher_thread)
     {
-        Result = VmMakeResult(VmErrorThread, GetLastError());
+        result = vm_make_result(VM_ERROR_THREAD, GetLastError());
         goto exit;
     }
 
-    Result = VmResultSuccess;
+    result = VM_RESULT_SUCCESS;
 
 exit:
-    return Result;
+    return result;
 }
 
-VmResult VmWaitDispatcher(Vm *Instance)
+vm_result_t vm_wait_dispatcher(vm_t *instance)
 {
-    return VmWaitDispatcherEx(Instance, FALSE);
+    return vm_wait_dispatcher_ex(instance, FALSE);
 }
 
-VmResult VmStopDispatcher(Vm *Instance)
+vm_result_t vm_stop_dispatcher(vm_t *instance)
 {
-    return VmWaitDispatcherEx(Instance, TRUE);
+    return vm_wait_dispatcher_ex(instance, TRUE);
 }
 
-static VmResult VmWaitDispatcherEx(Vm *Instance, BOOL Cancel)
+static vm_result_t vm_wait_dispatcher_ex(vm_t *instance, BOOL cancel)
 {
-    VmResult Result;
+    vm_result_t result;
 
-    if (0 == Instance->DispatcherThread)
+    if (0 == instance->dispatcher_thread)
     {
-        Result = VmErrorInvalid;
+        result = VM_ERROR_MISUSE;
         goto exit;
     }
 
-    if (Cancel)
-        VmCancelDispatcher(Instance);
+    if (cancel)
+        vm_cancel_dispatcher(instance);
 
-    WaitForSingleObject(Instance->DispatcherThread, INFINITE);
+    WaitForSingleObject(instance->dispatcher_thread, INFINITE);
 
-    Result = VmResultSuccess;
+    result = VM_RESULT_SUCCESS;
 
 exit:
-    return Result;
+    return result;
 }
 
-static VOID VmCancelDispatcher(Vm *Instance)
+static VOID vm_cancel_dispatcher(vm_t *instance)
 {
-    for (UINT32 CpuIndex = (UINT32)Instance->Config.CpuCount - 1;
-        Instance->Config.CpuCount > CpuIndex; CpuIndex--)
-        WHvCancelRunVirtualProcessor(Instance->Partition, CpuIndex, 0);
+    for (UINT32 cpu_index = (UINT32)instance->config.cpu_count - 1;
+        instance->config.cpu_count > cpu_index; cpu_index--)
+        WHvCancelRunVirtualProcessor(instance->partition, cpu_index, 0);
 }
 
-static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
+static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
 {
-    VmResult Result;
-    Vm *Instance = Instance0;
-    HANDLE DispatcherThread = 0;
-    UINT32 CpuIndex;
-    BOOL CpuCreated = FALSE;
-    WHV_RUN_VP_EXIT_CONTEXT ExitContext;
-    HRESULT HResult;
+    vm_result_t result;
+    vm_t *instance = instance0;
+    HANDLE dispatcher_thread = 0;
+    UINT32 cpu_index;
+    BOOL cpu_created = FALSE;
+    WHV_RUN_VP_EXIT_CONTEXT exit_context;
+    HRESULT hresult;
 
     /*
      * The following code block is thread-safe because the CreateThread call
@@ -234,33 +234,33 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
      * must act as a barrier: by the time the new thread is created it must
      * observe the world as if all previous code has run.
      */
-    CpuIndex = (UINT32)Instance->Config.CpuCount - Instance->DispatcherThreadCount;
-    if (1 < Instance->DispatcherThreadCount)
+    cpu_index = (UINT32)instance->config.cpu_count - instance->dispatcher_thread_count;
+    if (1 < instance->dispatcher_thread_count)
     {
-        Instance->DispatcherThreadCount--;
-        DispatcherThread = CreateThread(0, 0, VmDispatcherThread, Instance, 0, 0);
-        if (0 == DispatcherThread)
+        instance->dispatcher_thread_count--;
+        dispatcher_thread = CreateThread(0, 0, vm_dispatcher_thread, instance, 0, 0);
+        if (0 == dispatcher_thread)
         {
-            Result = VmMakeResult(VmErrorThread, GetLastError());
+            result = vm_make_result(VM_ERROR_THREAD, GetLastError());
             goto exit;
         }
     }
 
-    HResult = WHvCreateVirtualProcessor(Instance->Partition, CpuIndex, 0);
-    if (FAILED(HResult))
+    hresult = WHvCreateVirtualProcessor(instance->partition, cpu_index, 0);
+    if (FAILED(hresult))
     {
-        Result = VmMakeResult(VmErrorCpu, HResult);
+        result = vm_make_result(VM_ERROR_CPU, hresult);
         goto exit;
     }
-    CpuCreated = TRUE;
+    cpu_created = TRUE;
 
     for (;;)
     {
-        HResult = WHvRunVirtualProcessor(Instance->Partition,
-            CpuIndex, &ExitContext, sizeof ExitContext);
-        if (FAILED(HResult))
+        hresult = WHvRunVirtualProcessor(instance->partition,
+            cpu_index, &exit_context, sizeof exit_context);
+        if (FAILED(hresult))
         {
-            Result = VmMakeResult(VmErrorCpu, HResult);
+            result = vm_make_result(VM_ERROR_CPU, hresult);
             goto exit;
         }
 
@@ -272,192 +272,193 @@ static DWORD WINAPI VmDispatcherThread(PVOID Instance0)
          * A sensible person would have done some perf measurements first.
          */
 #define SQUASH(x)                       ((((x) & 0x3000) >> 8) | ((x) & 0xf))
-        static VmResult (*Dispatch[64])(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext) =
+        static vm_result_t (*dispatch[64])(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context) =
         {
-            [0x00] = VmDispatcherUnknown,
-            [0x01] = VmDispatcherUnknown,
-            [0x02] = VmDispatcherUnknown,
-            [0x03] = VmDispatcherUnknown,
-            [0x04] = VmDispatcherUnknown,
-            [0x05] = VmDispatcherUnknown,
-            [0x06] = VmDispatcherUnknown,
-            [0x07] = VmDispatcherUnknown,
-            [0x08] = VmDispatcherUnknown,
-            [0x09] = VmDispatcherUnknown,
-            [0x0a] = VmDispatcherUnknown,
-            [0x0b] = VmDispatcherUnknown,
-            [0x0c] = VmDispatcherUnknown,
-            [0x0d] = VmDispatcherUnknown,
-            [0x0e] = VmDispatcherUnknown,
-            [0x0f] = VmDispatcherUnknown,
-            [0x10] = VmDispatcherUnknown,
-            [0x11] = VmDispatcherUnknown,
-            [0x12] = VmDispatcherUnknown,
-            [0x13] = VmDispatcherUnknown,
-            [0x14] = VmDispatcherUnknown,
-            [0x15] = VmDispatcherUnknown,
-            [0x16] = VmDispatcherUnknown,
-            [0x17] = VmDispatcherUnknown,
-            [0x18] = VmDispatcherUnknown,
-            [0x19] = VmDispatcherUnknown,
-            [0x1a] = VmDispatcherUnknown,
-            [0x1b] = VmDispatcherUnknown,
-            [0x1c] = VmDispatcherUnknown,
-            [0x1d] = VmDispatcherUnknown,
-            [0x1e] = VmDispatcherUnknown,
-            [0x1f] = VmDispatcherUnknown,
-            [0x20] = VmDispatcherUnknown,
-            [0x21] = VmDispatcherUnknown,
-            [0x22] = VmDispatcherUnknown,
-            [0x23] = VmDispatcherUnknown,
-            [0x24] = VmDispatcherUnknown,
-            [0x25] = VmDispatcherUnknown,
-            [0x26] = VmDispatcherUnknown,
-            [0x27] = VmDispatcherUnknown,
-            [0x28] = VmDispatcherUnknown,
-            [0x29] = VmDispatcherUnknown,
-            [0x2a] = VmDispatcherUnknown,
-            [0x2b] = VmDispatcherUnknown,
-            [0x2c] = VmDispatcherUnknown,
-            [0x2d] = VmDispatcherUnknown,
-            [0x2e] = VmDispatcherUnknown,
-            [0x2f] = VmDispatcherUnknown,
-            [0x30] = VmDispatcherUnknown,
-            [0x31] = VmDispatcherUnknown,
-            [0x32] = VmDispatcherUnknown,
-            [0x33] = VmDispatcherUnknown,
-            [0x34] = VmDispatcherUnknown,
-            [0x35] = VmDispatcherUnknown,
-            [0x36] = VmDispatcherUnknown,
-            [0x37] = VmDispatcherUnknown,
-            [0x38] = VmDispatcherUnknown,
-            [0x39] = VmDispatcherUnknown,
-            [0x3a] = VmDispatcherUnknown,
-            [0x3b] = VmDispatcherUnknown,
-            [0x3c] = VmDispatcherUnknown,
-            [0x3d] = VmDispatcherUnknown,
-            [0x3e] = VmDispatcherUnknown,
-            [0x3f] = VmDispatcherUnknown,
+            [0x00] = vm_dispatcher_unknown,
+            [0x01] = vm_dispatcher_unknown,
+            [0x02] = vm_dispatcher_unknown,
+            [0x03] = vm_dispatcher_unknown,
+            [0x04] = vm_dispatcher_unknown,
+            [0x05] = vm_dispatcher_unknown,
+            [0x06] = vm_dispatcher_unknown,
+            [0x07] = vm_dispatcher_unknown,
+            [0x08] = vm_dispatcher_unknown,
+            [0x09] = vm_dispatcher_unknown,
+            [0x0a] = vm_dispatcher_unknown,
+            [0x0b] = vm_dispatcher_unknown,
+            [0x0c] = vm_dispatcher_unknown,
+            [0x0d] = vm_dispatcher_unknown,
+            [0x0e] = vm_dispatcher_unknown,
+            [0x0f] = vm_dispatcher_unknown,
+            [0x10] = vm_dispatcher_unknown,
+            [0x11] = vm_dispatcher_unknown,
+            [0x12] = vm_dispatcher_unknown,
+            [0x13] = vm_dispatcher_unknown,
+            [0x14] = vm_dispatcher_unknown,
+            [0x15] = vm_dispatcher_unknown,
+            [0x16] = vm_dispatcher_unknown,
+            [0x17] = vm_dispatcher_unknown,
+            [0x18] = vm_dispatcher_unknown,
+            [0x19] = vm_dispatcher_unknown,
+            [0x1a] = vm_dispatcher_unknown,
+            [0x1b] = vm_dispatcher_unknown,
+            [0x1c] = vm_dispatcher_unknown,
+            [0x1d] = vm_dispatcher_unknown,
+            [0x1e] = vm_dispatcher_unknown,
+            [0x1f] = vm_dispatcher_unknown,
+            [0x20] = vm_dispatcher_unknown,
+            [0x21] = vm_dispatcher_unknown,
+            [0x22] = vm_dispatcher_unknown,
+            [0x23] = vm_dispatcher_unknown,
+            [0x24] = vm_dispatcher_unknown,
+            [0x25] = vm_dispatcher_unknown,
+            [0x26] = vm_dispatcher_unknown,
+            [0x27] = vm_dispatcher_unknown,
+            [0x28] = vm_dispatcher_unknown,
+            [0x29] = vm_dispatcher_unknown,
+            [0x2a] = vm_dispatcher_unknown,
+            [0x2b] = vm_dispatcher_unknown,
+            [0x2c] = vm_dispatcher_unknown,
+            [0x2d] = vm_dispatcher_unknown,
+            [0x2e] = vm_dispatcher_unknown,
+            [0x2f] = vm_dispatcher_unknown,
+            [0x30] = vm_dispatcher_unknown,
+            [0x31] = vm_dispatcher_unknown,
+            [0x32] = vm_dispatcher_unknown,
+            [0x33] = vm_dispatcher_unknown,
+            [0x34] = vm_dispatcher_unknown,
+            [0x35] = vm_dispatcher_unknown,
+            [0x36] = vm_dispatcher_unknown,
+            [0x37] = vm_dispatcher_unknown,
+            [0x38] = vm_dispatcher_unknown,
+            [0x39] = vm_dispatcher_unknown,
+            [0x3a] = vm_dispatcher_unknown,
+            [0x3b] = vm_dispatcher_unknown,
+            [0x3c] = vm_dispatcher_unknown,
+            [0x3d] = vm_dispatcher_unknown,
+            [0x3e] = vm_dispatcher_unknown,
+            [0x3f] = vm_dispatcher_unknown,
 
-            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = VmDispatcherMemoryAccess,
-            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = VmDispatcherX64IoPortAccess,
-            [SQUASH(WHvRunVpExitReasonCanceled)] = VmDispatcherCanceled,
+            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = vm_dispatcher_MemoryAccess,
+            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = vm_dispatcher_X64IoPortAccess,
+            [SQUASH(WHvRunVpExitReasonCanceled)] = vm_dispatcher_Canceled,
         };
-        int Index = SQUASH(ExitContext.ExitReason);
+        int index = SQUASH(exit_context.ExitReason);
 #undef SQUASH
 
-        Result = Dispatch[Index](Instance, &ExitContext);
-        if (Instance->DebugLogFlags)
-            VmDebugLog(Instance, &ExitContext, Result);
-        if (VmResultSuccess != Result)
+        result = dispatch[index](instance, &exit_context);
+        if (instance->debug_log_flags)
+            vm_debug_log(cpu_index, &exit_context, result);
+        if (VM_RESULT_SUCCESS != result)
             goto exit;
     }
 
 exit:
-    VmCancelDispatcher(Instance);
+    vm_cancel_dispatcher(instance);
 
-    if (CpuCreated)
-        WHvDeleteVirtualProcessor(Instance->Partition, CpuIndex);
+    if (cpu_created)
+        WHvDeleteVirtualProcessor(instance->partition, cpu_index);
 
-    if (0 != DispatcherThread)
+    if (0 != dispatcher_thread)
     {
-        WaitForSingleObject(DispatcherThread, INFINITE);
-        CloseHandle(DispatcherThread);
+        WaitForSingleObject(dispatcher_thread, INFINITE);
+        CloseHandle(dispatcher_thread);
     }
 
-    return (DWORD)Result;
+    return (DWORD)result;
 }
 
-static VmResult VmDispatcherUnknown(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static vm_result_t vm_dispatcher_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VmErrorStop;
+    return VM_ERROR_STOP;
 }
 
-static VmResult VmDispatcherMemoryAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static vm_result_t vm_dispatcher_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VmErrorStop;
+    return VM_ERROR_STOP;
 }
 
-static VmResult VmDispatcherX64IoPortAccess(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static vm_result_t vm_dispatcher_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VmErrorStop;
+    return VM_ERROR_STOP;
 }
 
-static VmResult VmDispatcherCanceled(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext)
+static vm_result_t vm_dispatcher_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VmErrorStop;
+    return VM_ERROR_STOP;
 }
 
-static VOID VmDebugLog(Vm *Instance, WHV_RUN_VP_EXIT_CONTEXT *ExitContext, VmResult Result)
+static VOID vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
 {
-    char Buffer[1024];
-    char *ExitReasonStr;
-    DWORD Bytes;
+    char buffer[1024];
+    char *exit_reason_str;
+    DWORD bytes;
 
-    switch (ExitContext->ExitReason)
+    switch (exit_context->ExitReason)
     {
     case WHvRunVpExitReasonNone:
-        ExitReasonStr = "None";
+        exit_reason_str = "None";
         break;
     case WHvRunVpExitReasonMemoryAccess:
-        ExitReasonStr = "MemoryAccess";
+        exit_reason_str = "MemoryAccess";
         break;
     case WHvRunVpExitReasonX64IoPortAccess:
-        ExitReasonStr = "X64IoPortAccess";
+        exit_reason_str = "X64IoPortAccess";
         break;
     case WHvRunVpExitReasonUnrecoverableException:
-        ExitReasonStr = "UnrecoverableException";
+        exit_reason_str = "UnrecoverableException";
         break;
     case WHvRunVpExitReasonInvalidVpRegisterValue:
-        ExitReasonStr = "InvalidVpRegisterValue";
+        exit_reason_str = "InvalidVpRegisterValue";
         break;
     case WHvRunVpExitReasonUnsupportedFeature:
-        ExitReasonStr = "UnsupportedFeature";
+        exit_reason_str = "UnsupportedFeature";
         break;
     case WHvRunVpExitReasonX64InterruptWindow:
-        ExitReasonStr = "X64InterruptWindow";
+        exit_reason_str = "X64InterruptWindow";
         break;
     case WHvRunVpExitReasonX64Halt:
-        ExitReasonStr = "X64Halt";
+        exit_reason_str = "X64Halt";
         break;
     case WHvRunVpExitReasonX64ApicEoi:
-        ExitReasonStr = "X64ApicEoi";
+        exit_reason_str = "X64ApicEoi";
         break;
     case WHvRunVpExitReasonX64MsrAccess:
-        ExitReasonStr = "X64MsrAccess";
+        exit_reason_str = "X64MsrAccess";
         break;
     case WHvRunVpExitReasonX64Cpuid:
-        ExitReasonStr = "X64Cpuid";
+        exit_reason_str = "X64Cpuid";
         break;
     case WHvRunVpExitReasonException:
-        ExitReasonStr = "Exception";
+        exit_reason_str = "Exception";
         break;
     case WHvRunVpExitReasonX64Rdtsc:
-        ExitReasonStr = "X64Rdtsc";
+        exit_reason_str = "X64Rdtsc";
         break;
     case WHvRunVpExitReasonX64ApicSmiTrap:
-        ExitReasonStr = "X64ApicSmiTrap";
+        exit_reason_str = "X64ApicSmiTrap";
         break;
     case WHvRunVpExitReasonHypercall:
-        ExitReasonStr = "Hypercall";
+        exit_reason_str = "Hypercall";
         break;
     case WHvRunVpExitReasonX64ApicInitSipiTrap:
-        ExitReasonStr = "X64ApicInitSipiTrap";
+        exit_reason_str = "X64ApicInitSipiTrap";
         break;
     case WHvRunVpExitReasonX64ApicWriteTrap:
-        ExitReasonStr = "X64ApicWriteTrap";
+        exit_reason_str = "X64ApicWriteTrap";
         break;
     case WHvRunVpExitReasonCanceled:
-        ExitReasonStr = "Canceled";
+        exit_reason_str = "Canceled";
         break;
     }
 
-    wsprintfA(Buffer, "%s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
-        ExitReasonStr,
-        ExitContext->VpContext.Cs.Selector, ExitContext->VpContext.Rip,
-        (UINT32)ExitContext->VpContext.Rflags,
-        ExitContext->VpContext.ExecutionState.Cr0Pe,
-        VmGetError(Result));
-    Buffer[sizeof Buffer - 1] = '\0';
-    WriteFile(GetStdHandle(STD_ERROR_HANDLE), Buffer, lstrlenA(Buffer), &Bytes, 0);
+    wsprintfA(buffer, "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
+        (unsigned)cpu_index,
+        exit_reason_str,
+        exit_context->VpContext.Cs.Selector, exit_context->VpContext.Rip,
+        (UINT32)exit_context->VpContext.Rflags,
+        exit_context->VpContext.ExecutionState.Cr0Pe,
+        vm_result_error(result));
+    buffer[sizeof buffer - 1] = '\0';
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), buffer, lstrlenA(buffer), &bytes, 0);
 }

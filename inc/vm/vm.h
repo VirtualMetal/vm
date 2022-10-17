@@ -18,65 +18,64 @@
 extern "C" {
 #endif
 
-typedef long long VmResult;
-typedef int VmReason;
+#define VM_RESULT_SUCCESS               ((vm_result_t)0)
+#define VM_ERROR_NOTIMPL                ((vm_result_t)-1LL<<32)    /* not implemented */
+#define VM_ERROR_MISUSE                 ((vm_result_t)-2LL<<32)    /* function misuse (e.g. invalid args) */
+#define VM_ERROR_MEMORY                 ((vm_result_t)-3LL<<32)    /* memory error (e.g. out of memory) */
+#define VM_ERROR_HYPERVISOR             ((vm_result_t)-4LL<<32)    /* hypervisor error (e.g. not present) */
+#define VM_ERROR_INSTANCE               ((vm_result_t)-5LL<<32)    /* instance error (e.g. cannot create) */
+#define VM_ERROR_THREAD                 ((vm_result_t)-6LL<<32)    /* thread error (e.g. cannot create) */
+#define VM_ERROR_CPU                    ((vm_result_t)-7LL<<32)    /* cpu error (e.g. cannot create) */
+#define VM_ERROR_STOP                   ((vm_result_t)-8LL<<32)    /* stop processing */
 
-#define VmResultSuccess                 ((VmResult)0)
-#define VmErrorNotImpl                  ((VmResult)-1LL<<32)    /* not implemented */
-#define VmErrorInvalid                  ((VmResult)-2LL<<32)    /* invalid use (e.g. invalid args) */
-#define VmErrorMemory                   ((VmResult)-3LL<<32)    /* memory error (e.g. out of memory) */
-#define VmErrorHypervisor               ((VmResult)-4LL<<32)    /* hypervisor error (e.g. not present) */
-#define VmErrorInstance                 ((VmResult)-5LL<<32)    /* instance error (e.g. cannot create) */
-#define VmErrorThread                   ((VmResult)-6LL<<32)    /* thread error (e.g. cannot create) */
-#define VmErrorCpu                      ((VmResult)-7LL<<32)    /* cpu error (e.g. cannot create) */
-#define VmErrorStop                     ((VmResult)-8LL<<32)    /* stop processing */
+typedef long long vm_result_t;
 
 static inline
-VmResult VmMakeResult(VmResult Error, VmReason Reason)
+vm_result_t vm_make_result(vm_result_t error, vm_result_t reason)
 {
-    return Error | (VmResult)(unsigned)Reason;
+    return error | (reason & (vm_result_t)0x00000000ffffffffULL);
 }
 
 static inline
-VmResult VmGetError(VmResult Result)
+vm_result_t vm_result_error(vm_result_t result)
 {
-    return Result & (VmResult)0xffffffff00000000ULL;
+    return result & (vm_result_t)0xffffffff00000000ULL;
 }
 
 static inline
-VmReason VmGetReason(VmResult Result)
+vm_result_t vm_result_reason(vm_result_t result)
 {
-    return (VmReason)Result;
+    return result & (vm_result_t)0x00000000ffffffffULL;
 }
 
-typedef struct Vm Vm;
-typedef struct VmConfig VmConfig;
-typedef struct VmInterface VmInterface;
-typedef unsigned long long VmCount;
+typedef struct vm vm_t;
+typedef struct vm_config vm_config_t;
+typedef struct vm_interface vm_interface_t;
+typedef unsigned long long vm_count_t;
 
-struct VmConfig
+struct vm_config
 {
-    VmInterface *Interface;
-    VmCount CpuCount;
-    VmCount MemorySize;
+    vm_interface_t *interface;
+    vm_count_t cpu_count;
+    vm_count_t memory_size;
 
-    VmCount Reserved[61];
+    vm_count_t reserved[61];
 };
 
-struct VmInterface
+struct vm_interface
 {
-    VmResult (*IoPort)();
-    VmResult (*Memory)();
+    vm_result_t (*ioport)();
+    vm_result_t (*memory)();
 
-    VmResult (*Reserved[30])();
+    vm_result_t (*reserved[30])();
 };
 
-VmResult VmCreate(const VmConfig *Config, Vm **PInstance);
-VmResult VmDelete(Vm *Instance);
-VmResult VmSetDebugLog(Vm *Instance, unsigned Flags);
-VmResult VmStartDispatcher(Vm *Instance);
-VmResult VmWaitDispatcher(Vm *Instance);
-VmResult VmStopDispatcher(Vm *Instance);
+vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance);
+vm_result_t vm_delete(vm_t *instance);
+vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags);
+vm_result_t vm_start_dispatcher(vm_t *instance);
+vm_result_t vm_wait_dispatcher(vm_t *instance);
+vm_result_t vm_stop_dispatcher(vm_t *instance);
 
 #ifdef __cplusplus
 }

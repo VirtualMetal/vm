@@ -12,35 +12,39 @@
  */
 
 #include <vm/vm.h>
+#include <vm/internal.h>
 
-struct Vm
+struct vm
 {
+    vm_config_t config;
 };
 
-struct VmCpu
+vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
-};
-
-VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
-{
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmDestroy(Vm *Instance)
+vm_result_t vm_delete(vm_t *instance)
 {
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmCpuCreate(Vm *Instance, VmCpu **PCpu)
+vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
 {
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmCpuDestroy(VmCpu *Cpu)
+vm_result_t vm_start_dispatcher(vm_t *instance)
 {
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmCpuRun(VmCpu *Cpu, const VmCpuEvents *Events)
+vm_result_t vm_wait_dispatcher(vm_t *instance)
 {
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmCpuStop(VmCpu *Cpu)
+vm_result_t vm_stop_dispatcher(vm_t *instance)
 {
+    return VM_ERROR_NOTIMPL;
 }

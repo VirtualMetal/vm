@@ -15,107 +15,107 @@
 #include <vm/internal.h>
 #include <linux/kvm.h>
 
-struct Vm
+struct vm
 {
-    VmConfig Config;
-    int Hvfd;
-    int Vmfd;
+    vm_config_t config;
+    int hvfd;
+    int vmfd;
 };
 
-VmResult VmCreate(const VmConfig *Config, Vm **PInstance)
+vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
-    VmResult Result;
-    Vm *Instance = 0;
+    vm_result_t result;
+    vm_t *instance = 0;
 
-    *PInstance = 0;
+    *pinstance = 0;
 
-    Instance = malloc(sizeof *Instance);
-    if (0 == Instance)
+    instance = malloc(sizeof *instance);
+    if (0 == instance)
     {
-        Result = VmErrorMemory;
+        result = VM_ERROR_MEMORY;
         goto exit;
     }
 
-    memset(Instance, 0, sizeof *Instance);
-    Instance->Hvfd = -1;
-    Instance->Vmfd = -1;
-    Instance->Config = *Config;
+    memset(instance, 0, sizeof *instance);
+    instance->hvfd = -1;
+    instance->vmfd = -1;
+    instance->config = *config;
 
-    if (0 == Instance->Config.CpuCount)
+    if (0 == instance->config.cpu_count)
     {
-        cpu_set_t Affinity;
+        cpu_set_t affinity;
 
-        CPU_ZERO(&Affinity);
-        if (-1 == sched_getaffinity(0, sizeof Affinity, &Affinity))
+        CPU_ZERO(&affinity);
+        if (-1 == sched_getaffinity(0, sizeof affinity, &affinity))
         {
-            Result = VmMakeResult(VmErrorInstance, errno);
+            result = vm_make_result(VM_ERROR_INSTANCE, errno);
             goto exit;
         }
 
-        Instance->Config.CpuCount = (VmCount)CPU_COUNT(&Affinity);
+        instance->config.cpu_count = (vm_count_t)CPU_COUNT(&affinity);
     }
-    if (0 == Instance->Config.CpuCount)
-        Instance->Config.CpuCount = 1;
+    if (0 == instance->config.cpu_count)
+        instance->config.cpu_count = 1;
 
-    Instance->Hvfd = open("/dev/kvm", O_RDWR | O_CLOEXEC);
-    if (-1 == Instance->Hvfd)
+    instance->hvfd = open("/dev/kvm", O_RDWR | O_CLOEXEC);
+    if (-1 == instance->hvfd)
     {
-        Result = VmMakeResult(VmErrorHypervisor, errno);
+        result = vm_make_result(VM_ERROR_HYPERVISOR, errno);
         goto exit;
     }
 
-    if (12 != ioctl(Instance->Hvfd, KVM_GET_API_VERSION, NULL))
+    if (12 != ioctl(instance->hvfd, KVM_GET_API_VERSION, NULL))
     {
-        Result = VmErrorHypervisor;
+        result = VM_ERROR_HYPERVISOR;
         goto exit;
     }
 
-    Instance->Vmfd = ioctl(Instance->Hvfd, KVM_CREATE_VM, NULL);
-    if (-1 != Instance->Vmfd)
+    instance->vmfd = ioctl(instance->hvfd, KVM_CREATE_VM, NULL);
+    if (-1 == instance->vmfd)
     {
-        Result = VmMakeResult(VmErrorInstance, errno);
+        result = vm_make_result(VM_ERROR_INSTANCE, errno);
         goto exit;
     }
 
-    *PInstance = Instance;
-    Result = VmResultSuccess;
+    *pinstance = instance;
+    result = VM_RESULT_SUCCESS;
 
 exit:
-    if (VmResultSuccess != Result && 0 != Instance)
-        VmDelete(Instance);
+    if (VM_RESULT_SUCCESS != result && 0 != instance)
+        vm_delete(instance);
 
-    return Result;
+    return result;
 }
 
-VmResult VmDelete(Vm *Instance)
+vm_result_t vm_delete(vm_t *instance)
 {
-    if (-1 != Instance->Vmfd)
-        close(Instance->Vmfd);
+    if (-1 != instance->vmfd)
+        close(instance->vmfd);
 
-    if (-1 != Instance->Hvfd)
-        close(Instance->Hvfd);
+    if (-1 != instance->hvfd)
+        close(instance->hvfd);
 
-    free(Instance);
+    free(instance);
 
-    return VmResultSuccess;
+    return VM_RESULT_SUCCESS;
 }
 
-VmResult VmSetDebugLog(Vm *Instance, unsigned Flags)
+vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
 {
-    return VmErrorNotImpl;
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmStartDispatcher(Vm *Instance)
+vm_result_t vm_start_dispatcher(vm_t *instance)
 {
-    return VmErrorNotImpl;
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmWaitDispatcher(Vm *Instance)
+vm_result_t vm_wait_dispatcher(vm_t *instance)
 {
-    return VmErrorNotImpl;
+    return VM_ERROR_NOTIMPL;
 }
 
-VmResult VmStopDispatcher(Vm *Instance)
+vm_result_t vm_stop_dispatcher(vm_t *instance)
 {
-    return VmErrorNotImpl;
+    return VM_ERROR_NOTIMPL;
 }
