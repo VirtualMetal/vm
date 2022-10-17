@@ -11,6 +11,6 @@
  * Software Foundation.
  */
 
-#include <lib/hv/minimal.h>
+#include <vm/internal.h>
 
 LIBMAIN;

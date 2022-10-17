@@ -2,18 +2,16 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Include">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+      <UniqueIdentifier>{26e5ce39-97af-4f5a-b330-70e0c83e6836}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+      <UniqueIdentifier>{1e2ad2a8-5c0e-4743-9448-b988425a836a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Include\vm">
-      <UniqueIdentifier>{ea32c018-9220-4324-9d05-eacff3340407}</UniqueIdentifier>
+      <UniqueIdentifier>{d8e7c14c-9780-4852-ba4d-301fa16c8d33}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source\windows">
-      <UniqueIdentifier>{80bd14d9-ea15-43f0-b73d-c42e3b273c5a}</UniqueIdentifier>
+    <Filter Include="Source\linux">
+      <UniqueIdentifier>{0721a318-d51c-42a5-a789-aa6f1c51e82e}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -25,11 +23,11 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\windows\vm.c">
-      <Filter>Source\windows</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\vm\program.c">
       <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\vm\linux\vm.c">
+      <Filter>Source\linux</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

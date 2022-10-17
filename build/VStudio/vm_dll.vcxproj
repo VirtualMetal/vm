@@ -12,7 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h" />
-    <ClInclude Include="..\..\src\lib\hv\minimal.h" />
+    <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\library.c" />

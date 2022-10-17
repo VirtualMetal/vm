@@ -1,5 +1,5 @@
 /**
- * @file lib/hv/minimal.h
+ * @file vm/internal.h
  *
  * @copyright 2022 Bill Zissimopoulos
  */
@@ -11,8 +11,8 @@
  * Software Foundation.
  */
 
-#ifndef VM_LIB_HV_MINIMAL_H_INCLUDED
-#define VM_LIB_HV_MINIMAL_H_INCLUDED
+#ifndef VM_INTERNAL_H_INCLUDED
+#define VM_INTERNAL_H_INCLUDED
 
 #if defined(_WIN64)
 
@@ -105,6 +105,18 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 }
 
 #elif defined(__linux__)
+
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <sched.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#define EXEMAIN struct exemain_unused__ {}
+#define LIBMAIN struct libmain_unused__ {}
 
 #elif defined(__APPLE__)
 

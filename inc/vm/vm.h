@@ -40,7 +40,7 @@ VmResult VmMakeResult(VmResult Error, VmReason Reason)
 static inline
 VmResult VmGetError(VmResult Result)
 {
-    return Result & 0xffffffff00000000ULL;
+    return Result & (VmResult)0xffffffff00000000ULL;
 }
 
 static inline

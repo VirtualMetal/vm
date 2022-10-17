@@ -12,7 +12,7 @@
  */
 
 #include <vm/vm.h>
-#include <lib/hv/minimal.h>
+#include <vm/internal.h>
 #include <winhvplatform.h>
 
 struct Vm

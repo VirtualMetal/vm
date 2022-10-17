@@ -12,36 +12,9 @@
  */
 
 #include <vm/vm.h>
-#include <lib/hv/minimal.h>
+#include <vm/internal.h>
 
-static const char *basename(const char *path)
-{
-	for (const char *p = path; *p; p++)
-		switch (*p)
-		{
-		case '/':
-#if defined(_WIN64) || defined(_WIN32)
-		case '\\':
-#endif
-			path = p + 1;
-			break;
-		}
-	return path;
-}
-
-static const char *baseext(const char *path)
-{
-	for (const char *p = path; *p; p++)
-		switch (*p)
-		{
-		case '.':
-			path = p;
-			break;
-		}
-	return path;
-}
-
-int vmrun(int argc, char **argv)
+static int vmrun(int argc, char **argv)
 {
 	VmResult Result;
 	VmConfig Config;
@@ -55,7 +28,7 @@ int vmrun(int argc, char **argv)
 	if (VmResultSuccess != Result)
 		goto exit;
 
-	VmSetDebugLog(Instance, -1);
+	VmSetDebugLog(Instance, (unsigned)-1);
 
 	Result = VmStartDispatcher(Instance);
 	if (VmResultSuccess != Result)
@@ -66,7 +39,7 @@ int vmrun(int argc, char **argv)
 	VmStopDispatcher(Instance);
 
 exit:
-	if (0 == Instance)
+	if (0 != Instance)
 		VmDelete(Instance);
 
 	return VmResultSuccess == Result ? 0 : 1;
@@ -74,26 +47,7 @@ exit:
 
 int main(int argc, char **argv)
 {
-	const char *progname, *command;
-
-	progname = basename(argv[0]);
-	*(char *)baseext(progname) = '\0';
-	if ('v' == progname[0] && 'm' == progname[1] && '\0' != progname[2])
-		command = progname + 2;
-	else if (2 <= argc)
-		command = argv[1];
-	else
-		goto usage;
-
-	if (0 == strcmp("run", command))
-		return vmrun(argc - 1, argv + 1);
-	else
-		goto usage;
-
-	return 0;
-
-usage:
-	return 2;
+	return vmrun(argc, argv);
 }
 
 EXEMAIN;
