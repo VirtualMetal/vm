@@ -20,6 +20,9 @@ struct vm
     vm_config_t config;
     int hvfd;
     int vmfd;
+    void *memory;
+    int memory_set;
+    unsigned debug_log_flags;
 };
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
@@ -37,21 +40,20 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
 
     memset(instance, 0, sizeof *instance);
+    instance->config = *config;
     instance->hvfd = -1;
     instance->vmfd = -1;
-    instance->config = *config;
+    instance->memory = MAP_FAILED;
 
     if (0 == instance->config.cpu_count)
     {
         cpu_set_t affinity;
-
         CPU_ZERO(&affinity);
         if (-1 == sched_getaffinity(0, sizeof affinity, &affinity))
         {
             result = vm_make_result(VM_ERROR_INSTANCE, errno);
             goto exit;
         }
-
         instance->config.cpu_count = (vm_count_t)CPU_COUNT(&affinity);
     }
     if (0 == instance->config.cpu_count)
@@ -70,12 +72,38 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
+    if (0 >= ioctl(instance->hvfd, KVM_CHECK_EXTENSION, KVM_CAP_USER_MEMORY))
+    {
+        result = VM_ERROR_HYPERVISOR;
+        goto exit;
+    }
+
     instance->vmfd = ioctl(instance->hvfd, KVM_CREATE_VM, NULL);
     if (-1 == instance->vmfd)
     {
         result = vm_make_result(VM_ERROR_INSTANCE, errno);
         goto exit;
     }
+
+    instance->memory = mmap(
+        0, instance->config.memory_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (MAP_FAILED == instance->memory)
+    {
+        result = vm_make_result(VM_ERROR_MEMORY, errno);
+        goto exit;
+    }
+
+    struct kvm_userspace_memory_region region;
+    memset(&region, 0, sizeof region);
+    region.guest_phys_addr = 0;
+    region.memory_size = instance->config.memory_size;
+    region.userspace_addr = (__u64)instance->memory;
+    if (-1 == ioctl(instance->vmfd, KVM_SET_USER_MEMORY_REGION, &region))
+    {
+        result = vm_make_result(VM_ERROR_INSTANCE, errno);
+        goto exit;
+    }
+    instance->memory_set = 1;
 
     *pinstance = instance;
     result = VM_RESULT_SUCCESS;
@@ -89,6 +117,16 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
+    if (instance->memory_set)
+    {
+        struct kvm_userspace_memory_region region;
+        memset(&region, 0, sizeof region);
+        ioctl(instance->vmfd, KVM_SET_USER_MEMORY_REGION, &region);
+    }
+
+    if (MAP_FAILED != instance->memory)
+        munmap(instance->memory, instance->config.memory_size);
+
     if (-1 != instance->vmfd)
         close(instance->vmfd);
 
@@ -102,7 +140,9 @@ vm_result_t vm_delete(vm_t *instance)
 
 vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
 {
-    return VM_ERROR_NOTIMPL;
+    instance->debug_log_flags = flags;
+
+    return VM_RESULT_SUCCESS;
 }
 
 vm_result_t vm_start_dispatcher(vm_t *instance)

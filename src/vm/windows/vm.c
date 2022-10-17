@@ -66,13 +66,11 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     if (0 == instance->config.cpu_count)
     {
         DWORD_PTR process_mask, system_mask;
-
         if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
         {
             result = vm_make_result(VM_ERROR_INSTANCE, GetLastError());
             goto exit;
         }
-
         for (instance->config.cpu_count = 0; 0 != process_mask; process_mask >>= 1)
             instance->config.cpu_count += process_mask & 1;
     }
@@ -103,10 +101,10 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
 
     instance->memory = VirtualAlloc(
-        0, instance->config.memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+        0, instance->config.memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (0 == instance->memory)
     {
-        result = vm_make_result(VM_ERROR_INSTANCE, GetLastError());
+        result = vm_make_result(VM_ERROR_MEMORY, GetLastError());
         goto exit;
     }
 
@@ -115,7 +113,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
     if (FAILED(hresult))
     {
-        result = vm_make_result(VM_ERROR_MEMORY, hresult);
+        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
     instance->memory_mapped = TRUE;
