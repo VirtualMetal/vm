@@ -30,13 +30,13 @@ static int vmrun(int argc, char **argv)
 
     vm_set_debug_log(instance, (unsigned)-1);
 
-    result = vm_start_dispatcher(instance);
+    result = vm_start(instance);
     if (!vm_result_check(result))
         goto exit;
 
-    vm_wait_dispatcher(instance);
+    vm_wait(instance);
 
-    vm_stop_dispatcher(instance);
+    vm_stop(instance);
 
 exit:
     if (0 != instance)

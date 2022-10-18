@@ -149,7 +149,7 @@ vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_start_dispatcher(vm_t *instance)
+vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
     int error;
@@ -174,12 +174,12 @@ exit:
     return result;
 }
 
-vm_result_t vm_wait_dispatcher(vm_t *instance)
+vm_result_t vm_wait(vm_t *instance)
 {
     return VM_ERROR_NOTIMPL;
 }
 
-vm_result_t vm_stop_dispatcher(vm_t *instance)
+vm_result_t vm_stop(vm_t *instance)
 {
     return VM_ERROR_NOTIMPL;
 }

@@ -21,7 +21,7 @@ struct vm
     WHV_PARTITION_HANDLE partition;
     PVOID memory;
     BOOL memory_mapped;
-    UINT32 debug_log_flags;
+    unsigned debug_log_flags;
     HANDLE dispatcher_thread;
     UINT32 dispatcher_thread_count;
 };
@@ -154,7 +154,7 @@ vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_start_dispatcher(vm_t *instance)
+vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
 
@@ -178,12 +178,12 @@ exit:
     return result;
 }
 
-vm_result_t vm_wait_dispatcher(vm_t *instance)
+vm_result_t vm_wait(vm_t *instance)
 {
     return vm_wait_dispatcher_ex(instance, FALSE);
 }
 
-vm_result_t vm_stop_dispatcher(vm_t *instance)
+vm_result_t vm_stop(vm_t *instance)
 {
     return vm_wait_dispatcher_ex(instance, TRUE);
 }
