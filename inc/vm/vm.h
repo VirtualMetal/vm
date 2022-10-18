@@ -18,35 +18,24 @@
 extern "C" {
 #endif
 
-#define VM_RESULT_SUCCESS               ((vm_result_t)0)
-#define VM_ERROR_NOTIMPL                ((vm_result_t)-1LL<<32)    /* not implemented */
-#define VM_ERROR_MISUSE                 ((vm_result_t)-2LL<<32)    /* function misuse (e.g. invalid args) */
-#define VM_ERROR_MEMORY                 ((vm_result_t)-3LL<<32)    /* memory error (e.g. out of memory) */
-#define VM_ERROR_HYPERVISOR             ((vm_result_t)-4LL<<32)    /* hypervisor error (e.g. not present) */
-#define VM_ERROR_INSTANCE               ((vm_result_t)-5LL<<32)    /* instance error (e.g. cannot create) */
-#define VM_ERROR_THREAD                 ((vm_result_t)-6LL<<32)    /* thread error (e.g. cannot create) */
-#define VM_ERROR_CPU                    ((vm_result_t)-7LL<<32)    /* cpu error (e.g. cannot create) */
-#define VM_ERROR_STOP                   ((vm_result_t)-8LL<<32)    /* stop processing */
-
 typedef long long vm_result_t;
 
-static inline
-vm_result_t vm_make_result(vm_result_t error, vm_result_t reason)
-{
-    return error | (reason & (vm_result_t)0x00000000ffffffffULL);
-}
+#define VM_RESULT_SUCCESS               (0LL)
+#define VM_RESULT_REASON_MASK           ((1LL << 48) - 1LL)
+#define VM_RESULT_ERROR_MASK            (~VM_RESULT_REASON_MASK)
 
-static inline
-vm_result_t vm_result_error(vm_result_t result)
-{
-    return result & (vm_result_t)0xffffffff00000000ULL;
-}
+#define VM_ERROR_NOTIMPL                (-1LL<<48)  /* not implemented */
+#define VM_ERROR_MISUSE                 (-2LL<<48)  /* function misuse (e.g. invalid args) */
+#define VM_ERROR_MEMORY                 (-3LL<<48)  /* memory error (e.g. out of memory) */
+#define VM_ERROR_THREAD                 (-4LL<<48)  /* thread error (e.g. cannot create) */
+#define VM_ERROR_HYPERVISOR             (-5LL<<48)  /* hypervisor error (e.g. not present) */
+#define VM_ERROR_INSTANCE               (-6LL<<48)  /* vm instance error (e.g. cannot create) */
+#define VM_ERROR_CPU                    (-7LL<<48)  /* cpu error (e.g. cannot create) */
+#define VM_ERROR_STOP                   (-8LL<<48)  /* stop processing */
 
-static inline
-vm_result_t vm_result_reason(vm_result_t result)
-{
-    return result & (vm_result_t)0x00000000ffffffffULL;
-}
+#define vm_make_result(e, r)            ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
+#define vm_result_error(R)              ((vm_result_t)(R) & VM_RESULT_ERROR_MASK)
+#define vm_result_reason(R)             ((vm_result_t)(R) & VM_RESULT_REASON_MASK)
 
 typedef struct vm vm_t;
 typedef struct vm_config vm_config_t;
