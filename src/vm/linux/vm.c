@@ -51,7 +51,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         CPU_ZERO(&affinity);
         if (-1 == sched_getaffinity(0, sizeof affinity, &affinity))
         {
-            result = vm_result_make(VM_ERROR_INSTANCE, errno);
+            result = vm_result(VM_ERROR_INSTANCE, errno);
             goto exit;
         }
         instance->config.cpu_count = (vm_count_t)CPU_COUNT(&affinity);
@@ -62,7 +62,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->hvfd = open("/dev/kvm", O_RDWR | O_CLOEXEC);
     if (-1 == instance->hvfd)
     {
-        result = vm_result_make(VM_ERROR_HYPERVISOR, errno);
+        result = vm_result(VM_ERROR_HYPERVISOR, errno);
         goto exit;
     }
 
@@ -81,7 +81,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->vmfd = ioctl(instance->hvfd, KVM_CREATE_VM, NULL);
     if (-1 == instance->vmfd)
     {
-        result = vm_result_make(VM_ERROR_INSTANCE, errno);
+        result = vm_result(VM_ERROR_INSTANCE, errno);
         goto exit;
     }
 
@@ -89,7 +89,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         0, instance->config.memory_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (MAP_FAILED == instance->memory)
     {
-        result = vm_result_make(VM_ERROR_MEMORY, errno);
+        result = vm_result(VM_ERROR_MEMORY, errno);
         goto exit;
     }
 
@@ -100,7 +100,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     region.userspace_addr = (__u64)instance->memory;
     if (-1 == ioctl(instance->vmfd, KVM_SET_USER_MEMORY_REGION, &region))
     {
-        result = vm_result_make(VM_ERROR_INSTANCE, errno);
+        result = vm_result(VM_ERROR_INSTANCE, errno);
         goto exit;
     }
     instance->memory_set = 1;
@@ -109,7 +109,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     result = VM_RESULT_SUCCESS;
 
 exit:
-    if (!vm_result_success(result) && 0 != instance)
+    if (!vm_result_check(result) && 0 != instance)
         vm_delete(instance);
 
     return result;

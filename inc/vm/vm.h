@@ -33,10 +33,10 @@ typedef long long vm_result_t;
 #define VM_ERROR_CPU                    (-7LL<<48)  /* cpu error (e.g. cannot create) */
 #define VM_ERROR_STOP                   (-8LL<<48)  /* stop processing */
 
-#define vm_result_make(e, r)            ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
+#define vm_result(e, r)                 ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
 #define vm_result_error(R)              ((vm_result_t)(R) & VM_RESULT_ERROR_MASK)
 #define vm_result_reason(R)             ((vm_result_t)(R) & VM_RESULT_REASON_MASK)
-#define vm_result_success(R)            ((vm_result_t)(R) >= VM_RESULT_SUCCESS)
+#define vm_result_check(R)              ((vm_result_t)(R) >= VM_RESULT_SUCCESS)
 
 typedef struct vm vm_t;
 typedef struct vm_config vm_config_t;

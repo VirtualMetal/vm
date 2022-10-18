@@ -25,13 +25,13 @@ static int vmrun(int argc, char **argv)
 	config.memory_size = 4096;
 
 	result = vm_create(&config, &instance);
-	if (!vm_result_success(result))
+	if (!vm_result_check(result))
 		goto exit;
 
 	vm_set_debug_log(instance, (unsigned)-1);
 
 	result = vm_start_dispatcher(instance);
-	if (!vm_result_success(result))
+	if (!vm_result_check(result))
 		goto exit;
 
 	vm_wait_dispatcher(instance);
@@ -42,7 +42,7 @@ exit:
 	if (0 != instance)
 		vm_delete(instance);
 
-	return vm_result_success(result) ? 0 : 1;
+	return vm_result_check(result) ? 0 : 1;
 }
 
 int main(int argc, char **argv)
