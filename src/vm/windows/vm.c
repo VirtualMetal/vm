@@ -49,7 +49,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         WHvCapabilityCodeHypervisorPresent, &capability, sizeof capability, 0);
     if (FAILED(hresult) || !capability.HypervisorPresent)
     {
-        result = vm_make_result(VM_ERROR_HYPERVISOR, hresult);
+        result = vm_result_make(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
     }
 
@@ -68,7 +68,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         DWORD_PTR process_mask, system_mask;
         if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
         {
-            result = vm_make_result(VM_ERROR_INSTANCE, GetLastError());
+            result = vm_result_make(VM_ERROR_INSTANCE, GetLastError());
             goto exit;
         }
         for (instance->config.cpu_count = 0; 0 != process_mask; process_mask >>= 1)
@@ -80,7 +80,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     hresult = WHvCreatePartition(&instance->partition);
     if (FAILED(hresult))
     {
-        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result_make(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
 
@@ -89,14 +89,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         WHvPartitionPropertyCodeProcessorCount, &property, sizeof property);
     if (FAILED(hresult))
     {
-        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result_make(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
 
     hresult = WHvSetupPartition(instance->partition);
     if (FAILED(hresult))
     {
-        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result_make(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
 
@@ -104,7 +104,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         0, instance->config.memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (0 == instance->memory)
     {
-        result = vm_make_result(VM_ERROR_MEMORY, GetLastError());
+        result = vm_result_make(VM_ERROR_MEMORY, GetLastError());
         goto exit;
     }
 
@@ -113,7 +113,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
     if (FAILED(hresult))
     {
-        result = vm_make_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result_make(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
     instance->memory_mapped = TRUE;
@@ -122,7 +122,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     result = VM_RESULT_SUCCESS;
 
 exit:
-    if (VM_RESULT_SUCCESS != result && 0 != instance)
+    if (!vm_result_success(result) && 0 != instance)
         vm_delete(instance);
 
     return result;
@@ -168,7 +168,7 @@ vm_result_t vm_start_dispatcher(vm_t *instance)
     instance->dispatcher_thread = CreateThread(0, 0, vm_dispatcher_thread, instance, 0, 0);
     if (0 == instance->dispatcher_thread)
     {
-        result = vm_make_result(VM_ERROR_THREAD, GetLastError());
+        result = vm_result_make(VM_ERROR_THREAD, GetLastError());
         goto exit;
     }
 
@@ -239,7 +239,7 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
         dispatcher_thread = CreateThread(0, 0, vm_dispatcher_thread, instance, 0, 0);
         if (0 == dispatcher_thread)
         {
-            result = vm_make_result(VM_ERROR_THREAD, GetLastError());
+            result = vm_result_make(VM_ERROR_THREAD, GetLastError());
             goto exit;
         }
     }
@@ -247,7 +247,7 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
     hresult = WHvCreateVirtualProcessor(instance->partition, cpu_index, 0);
     if (FAILED(hresult))
     {
-        result = vm_make_result(VM_ERROR_CPU, hresult);
+        result = vm_result_make(VM_ERROR_CPU, hresult);
         goto exit;
     }
     cpu_created = TRUE;
@@ -258,7 +258,7 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
             cpu_index, &exit_context, sizeof exit_context);
         if (FAILED(hresult))
         {
-            result = vm_make_result(VM_ERROR_CPU, hresult);
+            result = vm_result_make(VM_ERROR_CPU, hresult);
             goto exit;
         }
 
@@ -347,7 +347,7 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
         result = dispatch[index](instance, &exit_context);
         if (instance->debug_log_flags)
             vm_debug_log(cpu_index, &exit_context, result);
-        if (VM_RESULT_SUCCESS != result)
+        if (!vm_result_success(result))
             goto exit;
     }
 
