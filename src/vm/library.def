@@ -1,7 +1,7 @@
 EXPORTS
-	vm_create
-	vm_delete
-	vm_set_debug_log
-	vm_start_dispatcher
-	vm_wait_dispatcher
-	vm_stop_dispatcher
+    vm_create
+    vm_delete
+    vm_set_debug_log
+    vm_start_dispatcher
+    vm_wait_dispatcher
+    vm_stop_dispatcher
