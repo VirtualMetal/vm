@@ -19,27 +19,31 @@ struct vm
 {
     vm_config_t config;
     WHV_PARTITION_HANDLE partition;
-    PVOID memory;
-    BOOL memory_mapped;
+    void *memory;
     unsigned debug_log_flags;
-    HANDLE dispatcher_thread;
-    UINT32 dispatcher_thread_count;
+    SRWLOCK cancel_lock;
+    HANDLE thread;                      /* protected by cancel_lock */
+    vm_count_t thread_count;
+    vm_result_t thread_result;
+    unsigned
+        is_cancelled:1,                 /* protected by cancel_lock */
+        has_mapped_range:1;
 };
 
-static vm_result_t vm_wait_dispatcher_ex(vm_t *instance, BOOL cancel);
-static VOID vm_cancel_dispatcher(vm_t *instance);
-static DWORD WINAPI vm_dispatcher_thread(PVOID instance0);
-static vm_result_t vm_dispatcher_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static vm_result_t vm_dispatcher_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static vm_result_t vm_dispatcher_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static vm_result_t vm_dispatcher_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static VOID vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
+static void vm_thread_set_cancelled(HANDLE thread);
+static int vm_thread_is_cancelled(HANDLE thread);
+static DWORD WINAPI vm_thread(PVOID instance0);
+static vm_result_t vm_cpuexit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_cpuexit_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_cpuexit_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_cpuexit_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static void vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
     vm_result_t result;
     vm_t *instance = 0;
-    WHV_PARTITION_PROPERTY property = { 0 };
+    WHV_PARTITION_PROPERTY property;
     WHV_CAPABILITY capability;
     HRESULT hresult;
 
@@ -62,13 +66,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    InitializeSRWLock(&instance->cancel_lock);
 
     if (0 == instance->config.cpu_count)
     {
         DWORD_PTR process_mask, system_mask;
         if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
         {
-            result = vm_result(VM_ERROR_INSTANCE, GetLastError());
+            result = vm_result(VM_ERROR_HYPERVISOR, GetLastError());
             goto exit;
         }
         for (instance->config.cpu_count = 0; 0 != process_mask; process_mask >>= 1)
@@ -84,6 +89,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
+    memset(&property, 0, sizeof property);
     property.ProcessorCount = (UINT32)instance->config.cpu_count;
     hresult = WHvSetPartitionProperty(instance->partition,
         WHvPartitionPropertyCodeProcessorCount, &property, sizeof property);
@@ -116,7 +122,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         result = vm_result(VM_ERROR_INSTANCE, hresult);
         goto exit;
     }
-    instance->memory_mapped = TRUE;
+    instance->has_mapped_range = 1;
 
     *pinstance = instance;
     result = VM_RESULT_SUCCESS;
@@ -130,10 +136,7 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
-    if (0 != instance->dispatcher_thread)
-        CloseHandle(instance->dispatcher_thread);
-
-    if (instance->memory_mapped)
+    if (instance->has_mapped_range)
         WHvUnmapGpaRange(instance->partition, 0, instance->config.memory_size);
 
     if (0 != instance->memory)
@@ -158,19 +161,30 @@ vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
 
-    if (0 != instance->dispatcher_thread)
+    if (0 != instance->thread)
     {
         result = VM_ERROR_MISUSE;
         goto exit;
     }
 
-    instance->dispatcher_thread_count = (UINT32)instance->config.cpu_count;
-    instance->dispatcher_thread = CreateThread(0, 0, vm_dispatcher_thread, instance, 0, 0);
-    if (0 == instance->dispatcher_thread)
+    InterlockedExchange64(&instance->thread_result, VM_RESULT_SUCCESS);
+
+    AcquireSRWLockExclusive(&instance->cancel_lock);
+
+    if (!instance->is_cancelled)
     {
-        result = vm_result(VM_ERROR_THREAD, GetLastError());
-        goto exit;
+        instance->thread_count = instance->config.cpu_count;
+        instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
+        if (0 == instance->thread)
+            result = vm_result(VM_ERROR_THREAD, GetLastError());
     }
+    else
+        result = VM_ERROR_CANCELLED;
+
+    ReleaseSRWLockExclusive(&instance->cancel_lock);
+
+    if (0 == instance->thread)
+        goto exit;
 
     result = VM_RESULT_SUCCESS;
 
@@ -180,69 +194,117 @@ exit:
 
 vm_result_t vm_wait(vm_t *instance)
 {
-    return vm_wait_dispatcher_ex(instance, FALSE);
-}
-
-vm_result_t vm_stop(vm_t *instance)
-{
-    return vm_wait_dispatcher_ex(instance, TRUE);
-}
-
-static vm_result_t vm_wait_dispatcher_ex(vm_t *instance, BOOL cancel)
-{
     vm_result_t result;
 
-    if (0 == instance->dispatcher_thread)
+    if (0 == instance->thread)
     {
         result = VM_ERROR_MISUSE;
         goto exit;
     }
 
-    if (cancel)
-        vm_cancel_dispatcher(instance);
+    WaitForSingleObject(instance->thread, INFINITE);
 
-    WaitForSingleObject(instance->dispatcher_thread, INFINITE);
+    AcquireSRWLockExclusive(&instance->cancel_lock);
 
-    result = VM_RESULT_SUCCESS;
+    CloseHandle(instance->thread);
+    instance->thread = 0;
+
+    ReleaseSRWLockExclusive(&instance->cancel_lock);
+
+    result = InterlockedCompareExchange64(&instance->thread_result, 0, 0);
 
 exit:
     return result;
 }
 
-static VOID vm_cancel_dispatcher(vm_t *instance)
+vm_result_t vm_cancel(vm_t *instance)
 {
-    for (UINT32 cpu_index = (UINT32)instance->config.cpu_count - 1;
-        instance->config.cpu_count > cpu_index; cpu_index--)
-        WHvCancelRunVirtualProcessor(instance->partition, cpu_index, 0);
+    /*
+     * Cancel CPU #0, which will end its thread and cancel CPU #1, etc.
+     */
+
+    AcquireSRWLockExclusive(&instance->cancel_lock);
+
+    instance->is_cancelled = 1;
+    if (0 != instance->thread)
+    {
+        vm_thread_set_cancelled(instance->thread);
+        WHvCancelRunVirtualProcessor(instance->partition, 0, 0);
+    }
+
+    ReleaseSRWLockExclusive(&instance->cancel_lock);
+
+    return VM_RESULT_SUCCESS;
 }
 
-static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
+static void vm_thread_set_cancelled(HANDLE thread)
 {
+    /* abuse the thread description to set the "cancelled" flag */
+    SetThreadDescription(thread, L"CANCELLED");
+
+    MemoryBarrier();
+}
+
+static int vm_thread_is_cancelled(HANDLE thread)
+{
+    int result;
+    HRESULT hresult;
+    PWSTR description;
+
+    MemoryBarrier();
+
+    /* abuse the thread description to get the "cancelled" flag */
+    hresult = GetThreadDescription(thread, &description);
+    if (FAILED(hresult))
+        return 0;
+
+    result = 0 == lstrcmpW(description, L"CANCELLED");
+    LocalFree(description);
+    return result;
+}
+
+static DWORD WINAPI vm_thread(PVOID instance0)
+{
+    /*
+     * Dispatcher thread blueprint:
+     *
+     * - Create the virtual CPU. After the virtual CPU has been created it can be cancelled.
+     *
+     * - Check the thread "cancel" flag. This avoids a situation where an attempt to cancel
+     * the thread's virtual CPU happens before it is created.
+     *
+     *     - When cancelling a thread, we first set the cancel flag and then cancel the
+     *     virtual CPU. OTOH when creating a thread, we first create the virtual CPU and then
+     *     check the cancel flag. This interleaving ensures that no cancellations are lost.
+     *
+     * - Create the next dispatcher thread.
+     *
+     * - Run the virtual CPU in a loop. If there is any error the loop will exit and will
+     * initiate a dispatcher shutdown.
+     *
+     * - If there is a next thread set its cancel flag. This avoids a situation where
+     * the next thread's virtual CPU has not been created yet.
+     *
+     * - Cancel the next virtual CPU. Usually vm_cancel will cancel the first dispatcher
+     * thread, which will cancel the next one and so on. However if an error happens in
+     * the virtual CPU loop of a thread that is not the first, then this thread will cancel
+     * the next thread and so on until the last thread, which does not have a next thread.
+     * The last thread however will cancel the first thread's virtual CPU (CPU #0), which
+     * is guaranteed to exist (so vm_thread_set_cancelled is not necessary). The first thread
+     * will then cancel the next thread and so on until all threads are cancelled. Notice that
+     * in this process it is possible to cancel a virtual CPU that has already been deleted;
+     * however this is benign.
+     */
+
     vm_result_t result;
     vm_t *instance = instance0;
-    HANDLE dispatcher_thread = 0;
     UINT32 cpu_index;
-    BOOL cpu_created = FALSE;
+    BOOL has_cpu = FALSE;
+    HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
     HRESULT hresult;
 
-    /*
-     * The following code block is thread-safe because the CreateThread call
-     * ensures that we run in a lockstep fashion. This is because the call
-     * must act as a barrier: by the time the new thread is created it must
-     * observe the world as if all previous code has run.
-     */
-    cpu_index = (UINT32)instance->config.cpu_count - instance->dispatcher_thread_count;
-    if (1 < instance->dispatcher_thread_count)
-    {
-        instance->dispatcher_thread_count--;
-        dispatcher_thread = CreateThread(0, 0, vm_dispatcher_thread, instance, 0, 0);
-        if (0 == dispatcher_thread)
-        {
-            result = vm_result(VM_ERROR_THREAD, GetLastError());
-            goto exit;
-        }
-    }
+    cpu_index = (UINT32)(instance->config.cpu_count - instance->thread_count);
 
     hresult = WHvCreateVirtualProcessor(instance->partition, cpu_index, 0);
     if (FAILED(hresult))
@@ -250,7 +312,30 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
         result = vm_result(VM_ERROR_CPU, hresult);
         goto exit;
     }
-    cpu_created = TRUE;
+    has_cpu = TRUE;
+
+    if (vm_thread_is_cancelled(GetCurrentThread()))
+    {
+        result = VM_ERROR_CANCELLED;
+        goto exit;
+    }
+
+    /*
+     * The following code block is thread-safe because the CreateThread call
+     * ensures that we run in a lockstep fashion. This is because the call
+     * must act as a barrier: by the time the new thread is created it must
+     * observe the world as if all previous code has run.
+     */
+    if (1 < instance->thread_count)
+    {
+        instance->thread_count--;
+        next_thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
+        if (0 == next_thread)
+        {
+            result = vm_result(VM_ERROR_THREAD, GetLastError());
+            goto exit;
+        }
+    }
 
     for (;;)
     {
@@ -272,74 +357,74 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
 #define SQUASH(x)                       ((((x) & 0x3000) >> 8) | ((x) & 0xf))
         static vm_result_t (*dispatch[64])(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context) =
         {
-            [0x00] = vm_dispatcher_unknown,
-            [0x01] = vm_dispatcher_unknown,
-            [0x02] = vm_dispatcher_unknown,
-            [0x03] = vm_dispatcher_unknown,
-            [0x04] = vm_dispatcher_unknown,
-            [0x05] = vm_dispatcher_unknown,
-            [0x06] = vm_dispatcher_unknown,
-            [0x07] = vm_dispatcher_unknown,
-            [0x08] = vm_dispatcher_unknown,
-            [0x09] = vm_dispatcher_unknown,
-            [0x0a] = vm_dispatcher_unknown,
-            [0x0b] = vm_dispatcher_unknown,
-            [0x0c] = vm_dispatcher_unknown,
-            [0x0d] = vm_dispatcher_unknown,
-            [0x0e] = vm_dispatcher_unknown,
-            [0x0f] = vm_dispatcher_unknown,
-            [0x10] = vm_dispatcher_unknown,
-            [0x11] = vm_dispatcher_unknown,
-            [0x12] = vm_dispatcher_unknown,
-            [0x13] = vm_dispatcher_unknown,
-            [0x14] = vm_dispatcher_unknown,
-            [0x15] = vm_dispatcher_unknown,
-            [0x16] = vm_dispatcher_unknown,
-            [0x17] = vm_dispatcher_unknown,
-            [0x18] = vm_dispatcher_unknown,
-            [0x19] = vm_dispatcher_unknown,
-            [0x1a] = vm_dispatcher_unknown,
-            [0x1b] = vm_dispatcher_unknown,
-            [0x1c] = vm_dispatcher_unknown,
-            [0x1d] = vm_dispatcher_unknown,
-            [0x1e] = vm_dispatcher_unknown,
-            [0x1f] = vm_dispatcher_unknown,
-            [0x20] = vm_dispatcher_unknown,
-            [0x21] = vm_dispatcher_unknown,
-            [0x22] = vm_dispatcher_unknown,
-            [0x23] = vm_dispatcher_unknown,
-            [0x24] = vm_dispatcher_unknown,
-            [0x25] = vm_dispatcher_unknown,
-            [0x26] = vm_dispatcher_unknown,
-            [0x27] = vm_dispatcher_unknown,
-            [0x28] = vm_dispatcher_unknown,
-            [0x29] = vm_dispatcher_unknown,
-            [0x2a] = vm_dispatcher_unknown,
-            [0x2b] = vm_dispatcher_unknown,
-            [0x2c] = vm_dispatcher_unknown,
-            [0x2d] = vm_dispatcher_unknown,
-            [0x2e] = vm_dispatcher_unknown,
-            [0x2f] = vm_dispatcher_unknown,
-            [0x30] = vm_dispatcher_unknown,
-            [0x31] = vm_dispatcher_unknown,
-            [0x32] = vm_dispatcher_unknown,
-            [0x33] = vm_dispatcher_unknown,
-            [0x34] = vm_dispatcher_unknown,
-            [0x35] = vm_dispatcher_unknown,
-            [0x36] = vm_dispatcher_unknown,
-            [0x37] = vm_dispatcher_unknown,
-            [0x38] = vm_dispatcher_unknown,
-            [0x39] = vm_dispatcher_unknown,
-            [0x3a] = vm_dispatcher_unknown,
-            [0x3b] = vm_dispatcher_unknown,
-            [0x3c] = vm_dispatcher_unknown,
-            [0x3d] = vm_dispatcher_unknown,
-            [0x3e] = vm_dispatcher_unknown,
-            [0x3f] = vm_dispatcher_unknown,
+            [0x00] = vm_cpuexit_unknown,
+            [0x01] = vm_cpuexit_unknown,
+            [0x02] = vm_cpuexit_unknown,
+            [0x03] = vm_cpuexit_unknown,
+            [0x04] = vm_cpuexit_unknown,
+            [0x05] = vm_cpuexit_unknown,
+            [0x06] = vm_cpuexit_unknown,
+            [0x07] = vm_cpuexit_unknown,
+            [0x08] = vm_cpuexit_unknown,
+            [0x09] = vm_cpuexit_unknown,
+            [0x0a] = vm_cpuexit_unknown,
+            [0x0b] = vm_cpuexit_unknown,
+            [0x0c] = vm_cpuexit_unknown,
+            [0x0d] = vm_cpuexit_unknown,
+            [0x0e] = vm_cpuexit_unknown,
+            [0x0f] = vm_cpuexit_unknown,
+            [0x10] = vm_cpuexit_unknown,
+            [0x11] = vm_cpuexit_unknown,
+            [0x12] = vm_cpuexit_unknown,
+            [0x13] = vm_cpuexit_unknown,
+            [0x14] = vm_cpuexit_unknown,
+            [0x15] = vm_cpuexit_unknown,
+            [0x16] = vm_cpuexit_unknown,
+            [0x17] = vm_cpuexit_unknown,
+            [0x18] = vm_cpuexit_unknown,
+            [0x19] = vm_cpuexit_unknown,
+            [0x1a] = vm_cpuexit_unknown,
+            [0x1b] = vm_cpuexit_unknown,
+            [0x1c] = vm_cpuexit_unknown,
+            [0x1d] = vm_cpuexit_unknown,
+            [0x1e] = vm_cpuexit_unknown,
+            [0x1f] = vm_cpuexit_unknown,
+            [0x20] = vm_cpuexit_unknown,
+            [0x21] = vm_cpuexit_unknown,
+            [0x22] = vm_cpuexit_unknown,
+            [0x23] = vm_cpuexit_unknown,
+            [0x24] = vm_cpuexit_unknown,
+            [0x25] = vm_cpuexit_unknown,
+            [0x26] = vm_cpuexit_unknown,
+            [0x27] = vm_cpuexit_unknown,
+            [0x28] = vm_cpuexit_unknown,
+            [0x29] = vm_cpuexit_unknown,
+            [0x2a] = vm_cpuexit_unknown,
+            [0x2b] = vm_cpuexit_unknown,
+            [0x2c] = vm_cpuexit_unknown,
+            [0x2d] = vm_cpuexit_unknown,
+            [0x2e] = vm_cpuexit_unknown,
+            [0x2f] = vm_cpuexit_unknown,
+            [0x30] = vm_cpuexit_unknown,
+            [0x31] = vm_cpuexit_unknown,
+            [0x32] = vm_cpuexit_unknown,
+            [0x33] = vm_cpuexit_unknown,
+            [0x34] = vm_cpuexit_unknown,
+            [0x35] = vm_cpuexit_unknown,
+            [0x36] = vm_cpuexit_unknown,
+            [0x37] = vm_cpuexit_unknown,
+            [0x38] = vm_cpuexit_unknown,
+            [0x39] = vm_cpuexit_unknown,
+            [0x3a] = vm_cpuexit_unknown,
+            [0x3b] = vm_cpuexit_unknown,
+            [0x3c] = vm_cpuexit_unknown,
+            [0x3d] = vm_cpuexit_unknown,
+            [0x3e] = vm_cpuexit_unknown,
+            [0x3f] = vm_cpuexit_unknown,
 
-            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = vm_dispatcher_MemoryAccess,
-            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = vm_dispatcher_X64IoPortAccess,
-            [SQUASH(WHvRunVpExitReasonCanceled)] = vm_dispatcher_Canceled,
+            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = vm_cpuexit_MemoryAccess,
+            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = vm_cpuexit_X64IoPortAccess,
+            [SQUASH(WHvRunVpExitReasonCanceled)] = vm_cpuexit_Canceled,
         };
         int index = SQUASH(exit_context.ExitReason);
 #undef SQUASH
@@ -352,41 +437,47 @@ static DWORD WINAPI vm_dispatcher_thread(PVOID instance0)
     }
 
 exit:
-    vm_cancel_dispatcher(instance);
+    if (!vm_result_check(result))
+        InterlockedCompareExchange64(&instance->thread_result, result, VM_RESULT_SUCCESS);
 
-    if (cpu_created)
-        WHvDeleteVirtualProcessor(instance->partition, cpu_index);
+    if (0 != next_thread)
+        vm_thread_set_cancelled(next_thread);
 
-    if (0 != dispatcher_thread)
+    WHvCancelRunVirtualProcessor(instance->partition, (cpu_index + 1) % instance->config.cpu_count, 0);
+
+    if (0 != next_thread)
     {
-        WaitForSingleObject(dispatcher_thread, INFINITE);
-        CloseHandle(dispatcher_thread);
+        WaitForSingleObject(next_thread, INFINITE);
+        CloseHandle(next_thread);
     }
 
-    return (DWORD)result;
+    if (has_cpu)
+        WHvDeleteVirtualProcessor(instance->partition, cpu_index);
+
+    return 0;
 }
 
-static vm_result_t vm_dispatcher_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_cpuexit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_STOP;
+    return VM_ERROR_CANCELLED;
 }
 
-static vm_result_t vm_dispatcher_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_cpuexit_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_STOP;
+    return VM_ERROR_CANCELLED;
 }
 
-static vm_result_t vm_dispatcher_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_cpuexit_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_STOP;
+    return VM_ERROR_CANCELLED;
 }
 
-static vm_result_t vm_dispatcher_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_cpuexit_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_STOP;
+    return VM_ERROR_CANCELLED;
 }
 
-static VOID vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
+static void vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
 {
     char buffer[1024];
     char *exit_reason_str;
@@ -448,6 +539,9 @@ static VOID vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context
     case WHvRunVpExitReasonCanceled:
         exit_reason_str = "Canceled";
         break;
+    default:
+        exit_reason_str = "?";
+        break;
     }
 
     wsprintfA(buffer, "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
@@ -456,7 +550,7 @@ static VOID vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context
         exit_context->VpContext.Cs.Selector, exit_context->VpContext.Rip,
         (UINT32)exit_context->VpContext.Rflags,
         exit_context->VpContext.ExecutionState.Cr0Pe,
-        vm_result_error(result));
+        (int)(vm_result_error(result) >> 48));
     buffer[sizeof buffer - 1] = '\0';
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), buffer, lstrlenA(buffer), &bytes, 0);
 }

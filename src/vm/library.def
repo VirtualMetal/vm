@@ -4,4 +4,4 @@ EXPORTS
     vm_set_debug_log
     vm_start
     vm_wait
-    vm_stop
+    vm_cancel

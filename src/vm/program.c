@@ -14,7 +14,7 @@
 #include <vm/vm.h>
 #include <vm/internal.h>
 
-static int vmrun(int argc, char **argv)
+static int vm_run(int argc, char **argv)
 {
     vm_result_t result;
     vm_config_t config;
@@ -36,8 +36,6 @@ static int vmrun(int argc, char **argv)
 
     vm_wait(instance);
 
-    vm_stop(instance);
-
 exit:
     if (0 != instance)
         vm_delete(instance);
@@ -47,7 +45,7 @@ exit:
 
 int main(int argc, char **argv)
 {
-    return vmrun(argc, argv);
+    return vm_run(argc, argv);
 }
 
 EXEMAIN;
