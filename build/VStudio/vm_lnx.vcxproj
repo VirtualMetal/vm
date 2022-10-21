@@ -47,12 +47,18 @@
     <IntDir>$(SolutionDir)build\$(ProjectName).build\$(Configuration)\$(PlatformTarget)\</IntDir>
     <TargetName>vm</TargetName>
     <TargetExt />
+    <RemoteCCompileToolExe>./cctool.sh</RemoteCCompileToolExe>
+    <RemoteCppCompileToolExe>./cctool.sh</RemoteCppCompileToolExe>
+    <RemoteLdToolExe>./cctool.sh</RemoteLdToolExe>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)build\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)build\$(ProjectName).build\$(Configuration)\$(PlatformTarget)\</IntDir>
     <TargetName>vm</TargetName>
     <TargetExt />
+    <RemoteCCompileToolExe>./cctool.sh</RemoteCCompileToolExe>
+    <RemoteCppCompileToolExe>./cctool.sh</RemoteCppCompileToolExe>
+    <RemoteLdToolExe>./cctool.sh</RemoteLdToolExe>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -60,6 +66,7 @@
     </ClCompile>
     <Link>
       <LibraryDependencies>pthread</LibraryDependencies>
+      <AdditionalOptions>-static %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -68,6 +75,8 @@
     </ClCompile>
     <Link>
       <LibraryDependencies>pthread</LibraryDependencies>
+      <AdditionalOptions>-static %(AdditionalOptions)</AdditionalOptions>
+      <DebuggerSymbolInformation>OmitAllSymbolInformation</DebuggerSymbolInformation>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
