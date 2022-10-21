@@ -85,7 +85,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     hresult = WHvCreatePartition(&instance->partition);
     if (FAILED(hresult))
     {
-        result = vm_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
     }
 
@@ -95,14 +95,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         WHvPartitionPropertyCodeProcessorCount, &property, sizeof property);
     if (FAILED(hresult))
     {
-        result = vm_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
     }
 
     hresult = WHvSetupPartition(instance->partition);
     if (FAILED(hresult))
     {
-        result = vm_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
     }
 
@@ -119,7 +119,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
     if (FAILED(hresult))
     {
-        result = vm_result(VM_ERROR_INSTANCE, hresult);
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
     }
     instance->has_mapped_range = 1;
@@ -176,7 +176,7 @@ vm_result_t vm_start(vm_t *instance)
         instance->thread_count = instance->config.cpu_count;
         instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
         if (0 == instance->thread)
-            result = vm_result(VM_ERROR_THREAD, GetLastError());
+            result = vm_result(VM_ERROR_VCPU, GetLastError());
     }
     else
         result = VM_ERROR_CANCELLED;
@@ -309,7 +309,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     hresult = WHvCreateVirtualProcessor(instance->partition, cpu_index, 0);
     if (FAILED(hresult))
     {
-        result = vm_result(VM_ERROR_CPU, hresult);
+        result = vm_result(VM_ERROR_VCPU, hresult);
         goto exit;
     }
     has_cpu = TRUE;
@@ -332,7 +332,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         next_thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
         if (0 == next_thread)
         {
-            result = vm_result(VM_ERROR_THREAD, GetLastError());
+            result = vm_result(VM_ERROR_VCPU, GetLastError());
             goto exit;
         }
     }
@@ -343,7 +343,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             cpu_index, &exit_context, sizeof exit_context);
         if (FAILED(hresult))
         {
-            result = vm_result(VM_ERROR_CPU, hresult);
+            result = vm_result(VM_ERROR_VCPU, hresult);
             goto exit;
         }
 

@@ -126,7 +126,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->vm_fd = ioctl(instance->hv_fd, KVM_CREATE_VM, NULL);
     if (-1 == instance->vm_fd)
     {
-        result = vm_result(VM_ERROR_INSTANCE, errno);
+        result = vm_result(VM_ERROR_HYPERVISOR, errno);
         goto exit;
     }
 
@@ -145,7 +145,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     region.userspace_addr = (__u64)instance->memory;
     if (-1 == ioctl(instance->vm_fd, KVM_SET_USER_MEMORY_REGION, &region))
     {
-        result = vm_result(VM_ERROR_INSTANCE, errno);
+        result = vm_result(VM_ERROR_HYPERVISOR, errno);
         goto exit;
     }
     instance->has_memory_region = 1;
@@ -223,7 +223,7 @@ vm_result_t vm_start(vm_t *instance)
             /* new thread has all signals blocked */
 
         if (0 != error)
-            result = vm_result(VM_ERROR_THREAD, error);
+            result = vm_result(VM_ERROR_VCPU, error);
         else
             instance->has_thread = 1;
     }
@@ -307,7 +307,7 @@ static void *vm_thread(void *instance0)
     cpu_fd = ioctl(instance->vm_fd, KVM_CREATE_VCPU, (void *)(uintptr_t)cpu_index);
     if (-1 == cpu_fd)
     {
-        result = vm_result(VM_ERROR_CPU, errno);
+        result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
     }
 
@@ -315,7 +315,7 @@ static void *vm_thread(void *instance0)
         0, (size_t)instance->cpu_run_size, PROT_READ | PROT_WRITE, MAP_SHARED, cpu_fd, 0);
     if (MAP_FAILED == cpu_run)
     {
-        result = vm_result(VM_ERROR_CPU, errno);
+        result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
     }
     atomic_store_explicit(&vm_thread_cpu_run, cpu_run, memory_order_relaxed);
@@ -332,7 +332,7 @@ static void *vm_thread(void *instance0)
         error = pthread_create(&next_thread, 0, vm_thread, instance);
         if (0 != error)
         {
-            result = vm_result(VM_ERROR_THREAD, error);
+            result = vm_result(VM_ERROR_VCPU, error);
             goto exit;
         }
         has_next_thread = 1;
@@ -352,7 +352,7 @@ static void *vm_thread(void *instance0)
         {
             result = EINTR == errno ?
                 VM_ERROR_CANCELLED :
-                vm_result(VM_ERROR_CPU, errno);
+                vm_result(VM_ERROR_VCPU, errno);
             goto exit;
         }
 
