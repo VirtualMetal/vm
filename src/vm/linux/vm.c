@@ -56,7 +56,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance = malloc(sizeof *instance);
     if (0 == instance)
     {
-        result = VM_ERROR_MEMORY;
+        result = vm_result(VM_ERROR_MEMORY, 0);
         goto exit;
     }
 
@@ -105,14 +105,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     if (12 != ioctl(instance->hv_fd, KVM_GET_API_VERSION, NULL))
     {
-        result = VM_ERROR_HYPERVISOR;
+        result = vm_result(VM_ERROR_HYPERVISOR, 0);
         goto exit;
     }
 
     if (0 >= ioctl(instance->hv_fd, KVM_CHECK_EXTENSION, KVM_CAP_USER_MEMORY) ||
         0 >= ioctl(instance->hv_fd, KVM_CHECK_EXTENSION, KVM_CAP_IMMEDIATE_EXIT))
     {
-        result = VM_ERROR_HYPERVISOR;
+        result = vm_result(VM_ERROR_HYPERVISOR, 0);
         goto exit;
     }
 
@@ -203,7 +203,7 @@ vm_result_t vm_start(vm_t *instance)
 
     if (instance->has_thread)
     {
-        result = VM_ERROR_MISUSE;
+        result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
@@ -230,7 +230,7 @@ vm_result_t vm_start(vm_t *instance)
     else
     {
         error = EINTR; /* ignored */
-        result = VM_ERROR_CANCELLED;
+        result = vm_result(VM_ERROR_CANCELLED, 0);
     }
 
     pthread_mutex_unlock(&instance->cancel_lock);
@@ -251,7 +251,7 @@ vm_result_t vm_wait(vm_t *instance)
 
     if (!instance->has_thread)
     {
-        result = VM_ERROR_MISUSE;
+        result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
@@ -351,7 +351,7 @@ static void *vm_thread(void *instance0)
         if (-1 == ioctl(cpu_fd, KVM_RUN, NULL))
         {
             result = EINTR == errno ?
-                VM_ERROR_CANCELLED :
+                vm_result(VM_ERROR_CANCELLED, EINTR) :
                 vm_result(VM_ERROR_VCPU, errno);
             goto exit;
         }
@@ -459,17 +459,17 @@ static void vm_thread_signal(int signum)
 
 static vm_result_t vm_cpuexit_unknown(vm_t *instance, struct kvm_run *cpu_run)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static vm_result_t vm_cpuexit_MMIO(vm_t *instance, struct kvm_run *cpu_run)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static vm_result_t vm_cpuexit_IO(vm_t *instance, struct kvm_run *cpu_run)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static void vm_debug_log(unsigned cpu_index, struct kvm_run *cpu_run, vm_result_t result)

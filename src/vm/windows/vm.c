@@ -60,7 +60,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance = malloc(sizeof *instance);
     if (0 == instance)
     {
-        result = VM_ERROR_MEMORY;
+        result = vm_result(VM_ERROR_MEMORY, 0);
         goto exit;
     }
 
@@ -163,7 +163,7 @@ vm_result_t vm_start(vm_t *instance)
 
     if (0 != instance->thread)
     {
-        result = VM_ERROR_MISUSE;
+        result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
@@ -179,7 +179,7 @@ vm_result_t vm_start(vm_t *instance)
             result = vm_result(VM_ERROR_VCPU, GetLastError());
     }
     else
-        result = VM_ERROR_CANCELLED;
+        result = vm_result(VM_ERROR_CANCELLED, 0);
 
     ReleaseSRWLockExclusive(&instance->cancel_lock);
 
@@ -198,7 +198,7 @@ vm_result_t vm_wait(vm_t *instance)
 
     if (0 == instance->thread)
     {
-        result = VM_ERROR_MISUSE;
+        result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
@@ -316,7 +316,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     if (vm_thread_is_cancelled(GetCurrentThread()))
     {
-        result = VM_ERROR_CANCELLED;
+        result = vm_result(VM_ERROR_CANCELLED, 0);
         goto exit;
     }
 
@@ -459,22 +459,22 @@ exit:
 
 static vm_result_t vm_cpuexit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static vm_result_t vm_cpuexit_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static vm_result_t vm_cpuexit_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static vm_result_t vm_cpuexit_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
-    return VM_ERROR_CANCELLED;
+    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static void vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
