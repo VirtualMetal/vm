@@ -212,6 +212,8 @@ vm_result_t vm_wait(vm_t *instance)
     ReleaseSRWLockExclusive(&instance->cancel_lock);
 
     result = InterlockedCompareExchange64(&instance->thread_result, 0, 0);
+    if (VM_ERROR_CANCELLED == vm_result_error(result))
+        result = VM_RESULT_SUCCESS;
 
 exit:
     return result;

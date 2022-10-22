@@ -265,6 +265,8 @@ vm_result_t vm_wait(vm_t *instance)
     pthread_mutex_unlock(&instance->cancel_lock);
 
     result = atomic_load(&instance->thread_result);
+    if (VM_ERROR_CANCELLED == vm_result_error(result))
+        result = VM_RESULT_SUCCESS;
 
 exit:
     return result;

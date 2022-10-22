@@ -34,7 +34,7 @@ static int vm_run(int argc, char **argv)
     if (!vm_result_check(result))
         goto exit;
 
-    vm_wait(instance);
+    result = vm_wait(instance);
 
 exit:
     if (0 != instance)
