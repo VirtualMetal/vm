@@ -33,6 +33,7 @@ struct vm
 static void vm_thread_set_cancelled(HANDLE thread);
 static int vm_thread_is_cancelled(HANDLE thread);
 static DWORD WINAPI vm_thread(PVOID instance0);
+static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
@@ -322,6 +323,10 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         goto exit;
     }
 
+    result = vm_vcpu_init(instance, vcpu_index);
+    if (!vm_result_check(result))
+        goto exit;
+
     /*
      * The following code block is thread-safe because the CreateThread call
      * ensures that we run in a lockstep fashion. This is because the call
@@ -457,6 +462,13 @@ exit:
         WHvDeleteVirtualProcessor(instance->partition, vcpu_index);
 
     return 0;
+}
+
+static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
+{
+#if defined(_M_X64)
+#endif
+    return VM_RESULT_SUCCESS;
 }
 
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)

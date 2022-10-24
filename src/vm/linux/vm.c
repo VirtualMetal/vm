@@ -38,6 +38,7 @@ struct vm
 
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
+static vm_result_t vm_vcpu_init(vm_t *instance, int vcpu_fd);
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
@@ -322,6 +323,10 @@ static void *vm_thread(void *instance0)
     }
     atomic_store_explicit(&vm_thread_vcpu_run, vcpu_run, memory_order_relaxed);
 
+    result = vm_vcpu_init(instance, vcpu_fd);
+    if (!vm_result_check(result))
+        goto exit;
+
     /*
      * The following code block is thread-safe because the pthread_create call
      * ensures that we run in a lockstep fashion. This is because the call
@@ -459,6 +464,29 @@ static void vm_thread_signal(int signum)
         atomic_store_explicit(&vcpu_run->immediate_exit, 1, memory_order_relaxed);
 }
 
+static vm_result_t vm_vcpu_init(vm_t *instance, int vcpu_fd)
+{
+#if defined(__x86_64__)
+    struct kvm_regs regs;
+    struct kvm_sregs sregs;
+
+    if (-1 == ioctl(vcpu_fd, (int)KVM_GET_SREGS, &sregs))
+        return vm_result(VM_ERROR_VCPU, errno);
+
+    sregs.cs.base = 0, sregs.cs.limit = 0xffff, sregs.cs.selector = 0;
+
+    if (-1 == ioctl(vcpu_fd, KVM_SET_SREGS, &sregs))
+        return vm_result(VM_ERROR_VCPU, errno);
+
+    memset(&regs, 0, sizeof regs);
+    regs.rflags = 2;
+    if (-1 == ioctl(vcpu_fd, KVM_SET_REGS, &regs))
+        return vm_result(VM_ERROR_VCPU, errno);
+
+    return VM_RESULT_SUCCESS;
+#endif
+}
+
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
@@ -477,109 +505,41 @@ static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run)
 static void vm_debug_log(unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result)
 {
     char buffer[1024];
-    char *exit_reason_str;
     ssize_t bytes;
 
     switch (vcpu_run->exit_reason)
     {
     case KVM_EXIT_UNKNOWN:
-        exit_reason_str = "UNKNOWN";
-        break;
-    case KVM_EXIT_EXCEPTION:
-        exit_reason_str = "EXCEPTION";
-        break;
-    case KVM_EXIT_IO:
-        exit_reason_str = "IO";
-        break;
-    case KVM_EXIT_HYPERCALL:
-        exit_reason_str = "HYPERCALL";
-        break;
-    case KVM_EXIT_DEBUG:
-        exit_reason_str = "DEBUG";
+        snprintf(buffer, sizeof buffer, "[%u] UNKNOWN(hardware_exit_reason=%llu) = %d\n",
+            vcpu_index,
+            (unsigned long long)vcpu_run->hw.hardware_exit_reason,
+            (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_HLT:
-        exit_reason_str = "HLT";
-        break;
-    case KVM_EXIT_MMIO:
-        exit_reason_str = "MMIO";
-        break;
-    case KVM_EXIT_IRQ_WINDOW_OPEN:
-        exit_reason_str = "IRQ_WINDOW_OPEN";
-        break;
-    case KVM_EXIT_SHUTDOWN:
-        exit_reason_str = "SHUTDOWN";
+        snprintf(buffer, sizeof buffer, "[%u] HLT() = %d\n",
+            vcpu_index,
+            (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_FAIL_ENTRY:
-        exit_reason_str = "FAIL_ENTRY";
-        break;
-    case KVM_EXIT_INTR:
-        exit_reason_str = "INTR";
-        break;
-    case KVM_EXIT_SET_TPR:
-        exit_reason_str = "SET_TPR";
-        break;
-    case KVM_EXIT_TPR_ACCESS:
-        exit_reason_str = "TPR_ACCESS";
-        break;
-    case KVM_EXIT_S390_SIEIC:
-        exit_reason_str = "S390_SIEIC";
-        break;
-    case KVM_EXIT_S390_RESET:
-        exit_reason_str = "S390_RESET";
-        break;
-    case KVM_EXIT_DCR:
-        exit_reason_str = "DCR";
-        break;
-    case KVM_EXIT_NMI:
-        exit_reason_str = "NMI";
+        snprintf(buffer, sizeof buffer, "[%u] FAIL_ENTRY(fail_entry=%llu) = %d\n",
+            vcpu_index,
+            (unsigned long long)vcpu_run->fail_entry.hardware_entry_failure_reason,
+            (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_INTERNAL_ERROR:
-        exit_reason_str = "INTERNAL_ERROR";
-        break;
-    case KVM_EXIT_OSI:
-        exit_reason_str = "OSI";
-        break;
-    case KVM_EXIT_PAPR_HCALL:
-        exit_reason_str = "PAPR_HCALL";
-        break;
-    case KVM_EXIT_S390_UCONTROL:
-        exit_reason_str = "S390_UCONTROL";
-        break;
-    case KVM_EXIT_WATCHDOG:
-        exit_reason_str = "WATCHDOG";
-        break;
-    case KVM_EXIT_S390_TSCH:
-        exit_reason_str = "S390_TSCH";
-        break;
-    case KVM_EXIT_EPR:
-        exit_reason_str = "EPR";
-        break;
-    case KVM_EXIT_SYSTEM_EVENT:
-        exit_reason_str = "SYSTEM_EVENT";
-        break;
-    case KVM_EXIT_S390_STSI:
-        exit_reason_str = "S390_STSI";
-        break;
-    case KVM_EXIT_IOAPIC_EOI:
-        exit_reason_str = "IOAPIC_EOI";
-        break;
-    case KVM_EXIT_HYPERV:
-        exit_reason_str = "HYPERV";
+        snprintf(buffer, sizeof buffer, "[%u] INTERNAL_ERROR(suberror=%u) = %d\n",
+            vcpu_index,
+            (unsigned)vcpu_run->internal.suberror,
+            (int)(vm_result_error(result) >> 48));
         break;
     default:
-        exit_reason_str = "?";
+        snprintf(buffer, sizeof buffer, "[%u] EXIT=%x() = %d\n",
+            vcpu_index,
+            vcpu_run->exit_reason,
+            (int)(vm_result_error(result) >> 48));
         break;
     }
 
-#if defined(__x86_64__)
-    snprintf(buffer, sizeof buffer, "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
-        vcpu_index,
-        exit_reason_str,
-        vcpu_run->s.regs.sregs.cs.selector, vcpu_run->s.regs.regs.rip,
-        (unsigned)vcpu_run->s.regs.regs.rflags,
-        (int)(vcpu_run->s.regs.sregs.cr0 & 1),
-        (int)(vm_result_error(result) >> 48));
-#endif
     bytes = write(STDERR_FILENO, buffer, strlen(buffer));
     (void)bytes;
 }
