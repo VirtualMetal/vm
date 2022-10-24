@@ -20,7 +20,7 @@ struct vm
     vm_config_t config;
     int hv_fd;
     int vm_fd;
-    int cpu_run_size;
+    int vcpu_run_size;
     void *memory;
     unsigned debug_log_flags;
     pthread_mutex_t cancel_lock;
@@ -38,12 +38,12 @@ struct vm
 
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
-static vm_result_t vm_cpuexit_unknown(vm_t *instance, struct kvm_run *cpu_run);
-static vm_result_t vm_cpuexit_MMIO(vm_t *instance, struct kvm_run *cpu_run);
-static vm_result_t vm_cpuexit_IO(vm_t *instance, struct kvm_run *cpu_run);
-static void vm_debug_log(unsigned cpu_index, struct kvm_run *cpu_run, vm_result_t result);
+static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run);
+static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
+static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
+static void vm_debug_log(unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
 
-#define SIGCANCEL                       SIGUSR1
+#define SIG_VCPU_CANCEL                 SIGUSR1
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -66,7 +66,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->vm_fd = -1;
     instance->memory = MAP_FAILED;
 
-    if (0 == instance->config.cpu_count)
+    if (0 == instance->config.vcpu_count)
     {
         cpu_set_t affinity;
         CPU_ZERO(&affinity);
@@ -75,10 +75,10 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
             result = vm_result(VM_ERROR_HYPERVISOR, errno);
             goto exit;
         }
-        instance->config.cpu_count = (vm_count_t)CPU_COUNT(&affinity);
+        instance->config.vcpu_count = (vm_count_t)CPU_COUNT(&affinity);
     }
-    if (0 == instance->config.cpu_count)
-        instance->config.cpu_count = 1;
+    if (0 == instance->config.vcpu_count)
+        instance->config.vcpu_count = 1;
 
     error = pthread_mutex_init(&instance->cancel_lock, 0);
     if (0 != error)
@@ -116,8 +116,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
-    instance->cpu_run_size = ioctl(instance->hv_fd, KVM_GET_VCPU_MMAP_SIZE, NULL);
-    if (-1 == instance->cpu_run_size)
+    instance->vcpu_run_size = ioctl(instance->hv_fd, KVM_GET_VCPU_MMAP_SIZE, NULL);
+    if (-1 == instance->vcpu_run_size)
     {
         result = vm_result(VM_ERROR_HYPERVISOR, errno);
         goto exit;
@@ -213,7 +213,7 @@ vm_result_t vm_start(vm_t *instance)
 
     if (!instance->is_cancelled)
     {
-        instance->thread_count = instance->config.cpu_count;
+        instance->thread_count = instance->config.vcpu_count;
 
         sigset_t newset, oldset;
         sigfillset(&newset);
@@ -278,7 +278,7 @@ vm_result_t vm_cancel(vm_t *instance)
 
     instance->is_cancelled = 1;
     if (instance->has_thread)
-        pthread_kill(instance->thread, SIGCANCEL);
+        pthread_kill(instance->thread, SIG_VCPU_CANCEL);
             /* if target already dead this fails with ESRCH; that's ok, we want to kill it anyway */
 
     pthread_mutex_unlock(&instance->cancel_lock);
@@ -286,14 +286,14 @@ vm_result_t vm_cancel(vm_t *instance)
     return VM_RESULT_SUCCESS;
 }
 
-static __thread struct kvm_run *vm_thread_cpu_run;
+static __thread struct kvm_run *vm_thread_vcpu_run;
 static void *vm_thread(void *instance0)
 {
     vm_result_t result;
     vm_t *instance = instance0;
-    unsigned cpu_index;
-    int cpu_fd = -1;
-    struct kvm_run *cpu_run = MAP_FAILED;
+    unsigned vcpu_index;
+    int vcpu_fd = -1;
+    struct kvm_run *vcpu_run = MAP_FAILED;
     pthread_t next_thread;
     int is_first_thread, has_next_thread;
     struct sigaction action;
@@ -302,25 +302,25 @@ static void *vm_thread(void *instance0)
 
     /* thread has all signals blocked -- see vm_start */
 
-    cpu_index = (unsigned)(instance->config.cpu_count - instance->thread_count);
-    is_first_thread = instance->config.cpu_count == instance->thread_count;
+    vcpu_index = (unsigned)(instance->config.vcpu_count - instance->thread_count);
+    is_first_thread = instance->config.vcpu_count == instance->thread_count;
     has_next_thread = 0;
 
-    cpu_fd = ioctl(instance->vm_fd, KVM_CREATE_VCPU, (void *)(uintptr_t)cpu_index);
-    if (-1 == cpu_fd)
+    vcpu_fd = ioctl(instance->vm_fd, KVM_CREATE_VCPU, (void *)(uintptr_t)vcpu_index);
+    if (-1 == vcpu_fd)
     {
         result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
     }
 
-    cpu_run = mmap(
-        0, (size_t)instance->cpu_run_size, PROT_READ | PROT_WRITE, MAP_SHARED, cpu_fd, 0);
-    if (MAP_FAILED == cpu_run)
+    vcpu_run = mmap(
+        0, (size_t)instance->vcpu_run_size, PROT_READ | PROT_WRITE, MAP_SHARED, vcpu_fd, 0);
+    if (MAP_FAILED == vcpu_run)
     {
         result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
     }
-    atomic_store_explicit(&vm_thread_cpu_run, cpu_run, memory_order_relaxed);
+    atomic_store_explicit(&vm_thread_vcpu_run, vcpu_run, memory_order_relaxed);
 
     /*
      * The following code block is thread-safe because the pthread_create call
@@ -342,15 +342,15 @@ static void *vm_thread(void *instance0)
 
     memset(&action, 0, sizeof action);
     action.sa_handler = vm_thread_signal;
-    sigaction(SIGCANCEL, &action, 0);
+    sigaction(SIG_VCPU_CANCEL, &action, 0);
 
     sigemptyset(&sigset);
-    sigaddset(&sigset, SIGCANCEL);
+    sigaddset(&sigset, SIG_VCPU_CANCEL);
     pthread_sigmask(SIG_UNBLOCK, &sigset, 0);
 
     for (;;)
     {
-        if (-1 == ioctl(cpu_fd, KVM_RUN, NULL))
+        if (-1 == ioctl(vcpu_fd, KVM_RUN, NULL))
         {
             result = EINTR == errno ?
                 vm_result(VM_ERROR_CANCELLED, EINTR) :
@@ -366,50 +366,50 @@ static void *vm_thread(void *instance0)
          * A sensible person would have done some perf measurements first.
          */
 #define SQUASH(x)                       ((x) & 0x1f)
-        static vm_result_t (*dispatch[32])(vm_t *instance, struct kvm_run *cpu_run) =
+        static vm_result_t (*dispatch[32])(vm_t *instance, struct kvm_run *vcpu_run) =
         {
-            [0x00] = vm_cpuexit_unknown,
-            [0x01] = vm_cpuexit_unknown,
-            [0x02] = vm_cpuexit_unknown,
-            [0x03] = vm_cpuexit_unknown,
-            [0x04] = vm_cpuexit_unknown,
-            [0x05] = vm_cpuexit_unknown,
-            [0x06] = vm_cpuexit_unknown,
-            [0x07] = vm_cpuexit_unknown,
-            [0x08] = vm_cpuexit_unknown,
-            [0x09] = vm_cpuexit_unknown,
-            [0x0a] = vm_cpuexit_unknown,
-            [0x0b] = vm_cpuexit_unknown,
-            [0x0c] = vm_cpuexit_unknown,
-            [0x0d] = vm_cpuexit_unknown,
-            [0x0e] = vm_cpuexit_unknown,
-            [0x0f] = vm_cpuexit_unknown,
-            [0x10] = vm_cpuexit_unknown,
-            [0x11] = vm_cpuexit_unknown,
-            [0x12] = vm_cpuexit_unknown,
-            [0x13] = vm_cpuexit_unknown,
-            [0x14] = vm_cpuexit_unknown,
-            [0x15] = vm_cpuexit_unknown,
-            [0x16] = vm_cpuexit_unknown,
-            [0x17] = vm_cpuexit_unknown,
-            [0x18] = vm_cpuexit_unknown,
-            [0x19] = vm_cpuexit_unknown,
-            [0x1a] = vm_cpuexit_unknown,
-            [0x1b] = vm_cpuexit_unknown,
-            [0x1c] = vm_cpuexit_unknown,
-            [0x1d] = vm_cpuexit_unknown,
-            [0x1e] = vm_cpuexit_unknown,
-            [0x1f] = vm_cpuexit_unknown,
+            [0x00] = vm_vcpu_exit_unknown,
+            [0x01] = vm_vcpu_exit_unknown,
+            [0x02] = vm_vcpu_exit_unknown,
+            [0x03] = vm_vcpu_exit_unknown,
+            [0x04] = vm_vcpu_exit_unknown,
+            [0x05] = vm_vcpu_exit_unknown,
+            [0x06] = vm_vcpu_exit_unknown,
+            [0x07] = vm_vcpu_exit_unknown,
+            [0x08] = vm_vcpu_exit_unknown,
+            [0x09] = vm_vcpu_exit_unknown,
+            [0x0a] = vm_vcpu_exit_unknown,
+            [0x0b] = vm_vcpu_exit_unknown,
+            [0x0c] = vm_vcpu_exit_unknown,
+            [0x0d] = vm_vcpu_exit_unknown,
+            [0x0e] = vm_vcpu_exit_unknown,
+            [0x0f] = vm_vcpu_exit_unknown,
+            [0x10] = vm_vcpu_exit_unknown,
+            [0x11] = vm_vcpu_exit_unknown,
+            [0x12] = vm_vcpu_exit_unknown,
+            [0x13] = vm_vcpu_exit_unknown,
+            [0x14] = vm_vcpu_exit_unknown,
+            [0x15] = vm_vcpu_exit_unknown,
+            [0x16] = vm_vcpu_exit_unknown,
+            [0x17] = vm_vcpu_exit_unknown,
+            [0x18] = vm_vcpu_exit_unknown,
+            [0x19] = vm_vcpu_exit_unknown,
+            [0x1a] = vm_vcpu_exit_unknown,
+            [0x1b] = vm_vcpu_exit_unknown,
+            [0x1c] = vm_vcpu_exit_unknown,
+            [0x1d] = vm_vcpu_exit_unknown,
+            [0x1e] = vm_vcpu_exit_unknown,
+            [0x1f] = vm_vcpu_exit_unknown,
 
-            [SQUASH(KVM_EXIT_MMIO)] = vm_cpuexit_MMIO,
-            [SQUASH(KVM_EXIT_IO)] = vm_cpuexit_IO,
+            [SQUASH(KVM_EXIT_MMIO)] = vm_vcpu_exit_mmio,
+            [SQUASH(KVM_EXIT_IO)] = vm_vcpu_exit_io,
         };
-        int index = SQUASH(cpu_run->exit_reason);
+        int index = SQUASH(vcpu_run->exit_reason);
 #undef SQUASH
 
-        result = dispatch[index](instance, cpu_run);
+        result = dispatch[index](instance, vcpu_run);
         if (instance->debug_log_flags)
-            vm_debug_log(cpu_index, cpu_run, result);
+            vm_debug_log(vcpu_index, vcpu_run, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -424,19 +424,19 @@ exit:
     if (has_next_thread)
     {
         void *retval;
-        pthread_kill(next_thread, SIGCANCEL);
+        pthread_kill(next_thread, SIG_VCPU_CANCEL);
             /* if target already dead this fails with ESRCH; that's ok, we want to kill it anyway */
         pthread_join(next_thread, &retval);
     }
 
-    if (MAP_FAILED != cpu_run)
+    if (MAP_FAILED != vcpu_run)
     {
-        atomic_store_explicit(&vm_thread_cpu_run, 0, memory_order_relaxed);
-        munmap(cpu_run, (size_t)instance->cpu_run_size);
+        atomic_store_explicit(&vm_thread_vcpu_run, 0, memory_order_relaxed);
+        munmap(vcpu_run, (size_t)instance->vcpu_run_size);
     }
 
-    if (-1 != cpu_fd)
-        close(cpu_fd);
+    if (-1 != vcpu_fd)
+        close(vcpu_fd);
 
     if (is_first_thread)
         pthread_barrier_wait(&instance->barrier);
@@ -454,33 +454,33 @@ static void vm_thread_signal(int signum)
      * See https://sourceware.org/legacy-ml/libc-alpha/2012-06/msg00372.html
      */
 
-    struct kvm_run *cpu_run = atomic_load_explicit(&vm_thread_cpu_run, memory_order_relaxed);
-    if (0 != cpu_run)
-        atomic_store_explicit(&cpu_run->immediate_exit, 1, memory_order_relaxed);
+    struct kvm_run *vcpu_run = atomic_load_explicit(&vm_thread_vcpu_run, memory_order_relaxed);
+    if (0 != vcpu_run)
+        atomic_store_explicit(&vcpu_run->immediate_exit, 1, memory_order_relaxed);
 }
 
-static vm_result_t vm_cpuexit_unknown(vm_t *instance, struct kvm_run *cpu_run)
+static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static vm_result_t vm_cpuexit_MMIO(vm_t *instance, struct kvm_run *cpu_run)
+static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static vm_result_t vm_cpuexit_IO(vm_t *instance, struct kvm_run *cpu_run)
+static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static void vm_debug_log(unsigned cpu_index, struct kvm_run *cpu_run, vm_result_t result)
+static void vm_debug_log(unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result)
 {
     char buffer[1024];
     char *exit_reason_str;
     ssize_t bytes;
 
-    switch (cpu_run->exit_reason)
+    switch (vcpu_run->exit_reason)
     {
     case KVM_EXIT_UNKNOWN:
         exit_reason_str = "UNKNOWN";
@@ -571,13 +571,15 @@ static void vm_debug_log(unsigned cpu_index, struct kvm_run *cpu_run, vm_result_
         break;
     }
 
+#if defined(__x86_64__)
     snprintf(buffer, sizeof buffer, "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
-        cpu_index,
+        vcpu_index,
         exit_reason_str,
-        cpu_run->s.regs.sregs.cs.selector, cpu_run->s.regs.regs.rip,
-        (unsigned)cpu_run->s.regs.regs.rflags,
-        (int)(cpu_run->s.regs.sregs.cr0 & 1),
+        vcpu_run->s.regs.sregs.cs.selector, vcpu_run->s.regs.regs.rip,
+        (unsigned)vcpu_run->s.regs.regs.rflags,
+        (int)(vcpu_run->s.regs.sregs.cr0 & 1),
         (int)(vm_result_error(result) >> 48));
+#endif
     bytes = write(STDERR_FILENO, buffer, strlen(buffer));
     (void)bytes;
 }

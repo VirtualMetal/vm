@@ -33,11 +33,11 @@ struct vm
 static void vm_thread_set_cancelled(HANDLE thread);
 static int vm_thread_is_cancelled(HANDLE thread);
 static DWORD WINAPI vm_thread(PVOID instance0);
-static vm_result_t vm_cpuexit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static vm_result_t vm_cpuexit_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static vm_result_t vm_cpuexit_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static vm_result_t vm_cpuexit_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static void vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
+static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_vcpu_exit_io(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static vm_result_t vm_vcpu_exit_cancelled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
+static void vm_debug_log(UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -68,7 +68,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->config = *config;
     InitializeSRWLock(&instance->cancel_lock);
 
-    if (0 == instance->config.cpu_count)
+    if (0 == instance->config.vcpu_count)
     {
         DWORD_PTR process_mask, system_mask;
         if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
@@ -76,11 +76,11 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
             result = vm_result(VM_ERROR_HYPERVISOR, GetLastError());
             goto exit;
         }
-        for (instance->config.cpu_count = 0; 0 != process_mask; process_mask >>= 1)
-            instance->config.cpu_count += process_mask & 1;
+        for (instance->config.vcpu_count = 0; 0 != process_mask; process_mask >>= 1)
+            instance->config.vcpu_count += process_mask & 1;
     }
-    if (0 == instance->config.cpu_count)
-        instance->config.cpu_count = 1;
+    if (0 == instance->config.vcpu_count)
+        instance->config.vcpu_count = 1;
 
     hresult = WHvCreatePartition(&instance->partition);
     if (FAILED(hresult))
@@ -90,7 +90,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
 
     memset(&property, 0, sizeof property);
-    property.ProcessorCount = (UINT32)instance->config.cpu_count;
+    property.ProcessorCount = (UINT32)instance->config.vcpu_count;
     hresult = WHvSetPartitionProperty(instance->partition,
         WHvPartitionPropertyCodeProcessorCount, &property, sizeof property);
     if (FAILED(hresult))
@@ -173,7 +173,7 @@ vm_result_t vm_start(vm_t *instance)
 
     if (!instance->is_cancelled)
     {
-        instance->thread_count = instance->config.cpu_count;
+        instance->thread_count = instance->config.vcpu_count;
         instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
         if (0 == instance->thread)
             result = vm_result(VM_ERROR_VCPU, GetLastError());
@@ -300,21 +300,21 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     vm_result_t result;
     vm_t *instance = instance0;
-    UINT32 cpu_index;
-    BOOL has_cpu = FALSE;
+    UINT32 vcpu_index;
+    BOOL has_vcpu = FALSE;
     HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
     HRESULT hresult;
 
-    cpu_index = (UINT32)(instance->config.cpu_count - instance->thread_count);
+    vcpu_index = (UINT32)(instance->config.vcpu_count - instance->thread_count);
 
-    hresult = WHvCreateVirtualProcessor(instance->partition, cpu_index, 0);
+    hresult = WHvCreateVirtualProcessor(instance->partition, vcpu_index, 0);
     if (FAILED(hresult))
     {
         result = vm_result(VM_ERROR_VCPU, hresult);
         goto exit;
     }
-    has_cpu = TRUE;
+    has_vcpu = TRUE;
 
     if (vm_thread_is_cancelled(GetCurrentThread()))
     {
@@ -342,7 +342,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     for (;;)
     {
         hresult = WHvRunVirtualProcessor(instance->partition,
-            cpu_index, &exit_context, sizeof exit_context);
+            vcpu_index, &exit_context, sizeof exit_context);
         if (FAILED(hresult))
         {
             result = vm_result(VM_ERROR_VCPU, hresult);
@@ -359,81 +359,81 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 #define SQUASH(x)                       ((((x) & 0x3000) >> 8) | ((x) & 0xf))
         static vm_result_t (*dispatch[64])(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context) =
         {
-            [0x00] = vm_cpuexit_unknown,
-            [0x01] = vm_cpuexit_unknown,
-            [0x02] = vm_cpuexit_unknown,
-            [0x03] = vm_cpuexit_unknown,
-            [0x04] = vm_cpuexit_unknown,
-            [0x05] = vm_cpuexit_unknown,
-            [0x06] = vm_cpuexit_unknown,
-            [0x07] = vm_cpuexit_unknown,
-            [0x08] = vm_cpuexit_unknown,
-            [0x09] = vm_cpuexit_unknown,
-            [0x0a] = vm_cpuexit_unknown,
-            [0x0b] = vm_cpuexit_unknown,
-            [0x0c] = vm_cpuexit_unknown,
-            [0x0d] = vm_cpuexit_unknown,
-            [0x0e] = vm_cpuexit_unknown,
-            [0x0f] = vm_cpuexit_unknown,
-            [0x10] = vm_cpuexit_unknown,
-            [0x11] = vm_cpuexit_unknown,
-            [0x12] = vm_cpuexit_unknown,
-            [0x13] = vm_cpuexit_unknown,
-            [0x14] = vm_cpuexit_unknown,
-            [0x15] = vm_cpuexit_unknown,
-            [0x16] = vm_cpuexit_unknown,
-            [0x17] = vm_cpuexit_unknown,
-            [0x18] = vm_cpuexit_unknown,
-            [0x19] = vm_cpuexit_unknown,
-            [0x1a] = vm_cpuexit_unknown,
-            [0x1b] = vm_cpuexit_unknown,
-            [0x1c] = vm_cpuexit_unknown,
-            [0x1d] = vm_cpuexit_unknown,
-            [0x1e] = vm_cpuexit_unknown,
-            [0x1f] = vm_cpuexit_unknown,
-            [0x20] = vm_cpuexit_unknown,
-            [0x21] = vm_cpuexit_unknown,
-            [0x22] = vm_cpuexit_unknown,
-            [0x23] = vm_cpuexit_unknown,
-            [0x24] = vm_cpuexit_unknown,
-            [0x25] = vm_cpuexit_unknown,
-            [0x26] = vm_cpuexit_unknown,
-            [0x27] = vm_cpuexit_unknown,
-            [0x28] = vm_cpuexit_unknown,
-            [0x29] = vm_cpuexit_unknown,
-            [0x2a] = vm_cpuexit_unknown,
-            [0x2b] = vm_cpuexit_unknown,
-            [0x2c] = vm_cpuexit_unknown,
-            [0x2d] = vm_cpuexit_unknown,
-            [0x2e] = vm_cpuexit_unknown,
-            [0x2f] = vm_cpuexit_unknown,
-            [0x30] = vm_cpuexit_unknown,
-            [0x31] = vm_cpuexit_unknown,
-            [0x32] = vm_cpuexit_unknown,
-            [0x33] = vm_cpuexit_unknown,
-            [0x34] = vm_cpuexit_unknown,
-            [0x35] = vm_cpuexit_unknown,
-            [0x36] = vm_cpuexit_unknown,
-            [0x37] = vm_cpuexit_unknown,
-            [0x38] = vm_cpuexit_unknown,
-            [0x39] = vm_cpuexit_unknown,
-            [0x3a] = vm_cpuexit_unknown,
-            [0x3b] = vm_cpuexit_unknown,
-            [0x3c] = vm_cpuexit_unknown,
-            [0x3d] = vm_cpuexit_unknown,
-            [0x3e] = vm_cpuexit_unknown,
-            [0x3f] = vm_cpuexit_unknown,
+            [0x00] = vm_vcpu_exit_unknown,
+            [0x01] = vm_vcpu_exit_unknown,
+            [0x02] = vm_vcpu_exit_unknown,
+            [0x03] = vm_vcpu_exit_unknown,
+            [0x04] = vm_vcpu_exit_unknown,
+            [0x05] = vm_vcpu_exit_unknown,
+            [0x06] = vm_vcpu_exit_unknown,
+            [0x07] = vm_vcpu_exit_unknown,
+            [0x08] = vm_vcpu_exit_unknown,
+            [0x09] = vm_vcpu_exit_unknown,
+            [0x0a] = vm_vcpu_exit_unknown,
+            [0x0b] = vm_vcpu_exit_unknown,
+            [0x0c] = vm_vcpu_exit_unknown,
+            [0x0d] = vm_vcpu_exit_unknown,
+            [0x0e] = vm_vcpu_exit_unknown,
+            [0x0f] = vm_vcpu_exit_unknown,
+            [0x10] = vm_vcpu_exit_unknown,
+            [0x11] = vm_vcpu_exit_unknown,
+            [0x12] = vm_vcpu_exit_unknown,
+            [0x13] = vm_vcpu_exit_unknown,
+            [0x14] = vm_vcpu_exit_unknown,
+            [0x15] = vm_vcpu_exit_unknown,
+            [0x16] = vm_vcpu_exit_unknown,
+            [0x17] = vm_vcpu_exit_unknown,
+            [0x18] = vm_vcpu_exit_unknown,
+            [0x19] = vm_vcpu_exit_unknown,
+            [0x1a] = vm_vcpu_exit_unknown,
+            [0x1b] = vm_vcpu_exit_unknown,
+            [0x1c] = vm_vcpu_exit_unknown,
+            [0x1d] = vm_vcpu_exit_unknown,
+            [0x1e] = vm_vcpu_exit_unknown,
+            [0x1f] = vm_vcpu_exit_unknown,
+            [0x20] = vm_vcpu_exit_unknown,
+            [0x21] = vm_vcpu_exit_unknown,
+            [0x22] = vm_vcpu_exit_unknown,
+            [0x23] = vm_vcpu_exit_unknown,
+            [0x24] = vm_vcpu_exit_unknown,
+            [0x25] = vm_vcpu_exit_unknown,
+            [0x26] = vm_vcpu_exit_unknown,
+            [0x27] = vm_vcpu_exit_unknown,
+            [0x28] = vm_vcpu_exit_unknown,
+            [0x29] = vm_vcpu_exit_unknown,
+            [0x2a] = vm_vcpu_exit_unknown,
+            [0x2b] = vm_vcpu_exit_unknown,
+            [0x2c] = vm_vcpu_exit_unknown,
+            [0x2d] = vm_vcpu_exit_unknown,
+            [0x2e] = vm_vcpu_exit_unknown,
+            [0x2f] = vm_vcpu_exit_unknown,
+            [0x30] = vm_vcpu_exit_unknown,
+            [0x31] = vm_vcpu_exit_unknown,
+            [0x32] = vm_vcpu_exit_unknown,
+            [0x33] = vm_vcpu_exit_unknown,
+            [0x34] = vm_vcpu_exit_unknown,
+            [0x35] = vm_vcpu_exit_unknown,
+            [0x36] = vm_vcpu_exit_unknown,
+            [0x37] = vm_vcpu_exit_unknown,
+            [0x38] = vm_vcpu_exit_unknown,
+            [0x39] = vm_vcpu_exit_unknown,
+            [0x3a] = vm_vcpu_exit_unknown,
+            [0x3b] = vm_vcpu_exit_unknown,
+            [0x3c] = vm_vcpu_exit_unknown,
+            [0x3d] = vm_vcpu_exit_unknown,
+            [0x3e] = vm_vcpu_exit_unknown,
+            [0x3f] = vm_vcpu_exit_unknown,
 
-            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = vm_cpuexit_MemoryAccess,
-            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = vm_cpuexit_X64IoPortAccess,
-            [SQUASH(WHvRunVpExitReasonCanceled)] = vm_cpuexit_Canceled,
+            [SQUASH(WHvRunVpExitReasonMemoryAccess)] = vm_vcpu_exit_mmio,
+            [SQUASH(WHvRunVpExitReasonX64IoPortAccess)] = vm_vcpu_exit_io,
+            [SQUASH(WHvRunVpExitReasonCanceled)] = vm_vcpu_exit_cancelled,
         };
         int index = SQUASH(exit_context.ExitReason);
 #undef SQUASH
 
         result = dispatch[index](instance, &exit_context);
         if (instance->debug_log_flags)
-            vm_debug_log(cpu_index, &exit_context, result);
+            vm_debug_log(vcpu_index, &exit_context, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -445,7 +445,7 @@ exit:
     if (0 != next_thread)
         vm_thread_set_cancelled(next_thread);
 
-    WHvCancelRunVirtualProcessor(instance->partition, (cpu_index + 1) % instance->config.cpu_count, 0);
+    WHvCancelRunVirtualProcessor(instance->partition, (vcpu_index + 1) % instance->config.vcpu_count, 0);
 
     if (0 != next_thread)
     {
@@ -453,33 +453,33 @@ exit:
         CloseHandle(next_thread);
     }
 
-    if (has_cpu)
-        WHvDeleteVirtualProcessor(instance->partition, cpu_index);
+    if (has_vcpu)
+        WHvDeleteVirtualProcessor(instance->partition, vcpu_index);
 
     return 0;
 }
 
-static vm_result_t vm_cpuexit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static vm_result_t vm_cpuexit_MemoryAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static vm_result_t vm_cpuexit_X64IoPortAccess(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_vcpu_exit_io(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static vm_result_t vm_cpuexit_Canceled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+static vm_result_t vm_vcpu_exit_cancelled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)
 {
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static void vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
+static void vm_debug_log(UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
 {
     char buffer[1024];
     char *exit_reason_str;
@@ -546,13 +546,15 @@ static void vm_debug_log(UINT32 cpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context
         break;
     }
 
+#if defined(_M_X64)
     wsprintfA(buffer, "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
-        (unsigned)cpu_index,
+        (unsigned)vcpu_index,
         exit_reason_str,
         exit_context->VpContext.Cs.Selector, exit_context->VpContext.Rip,
         (UINT32)exit_context->VpContext.Rflags,
         exit_context->VpContext.ExecutionState.Cr0Pe,
         (int)(vm_result_error(result) >> 48));
+#endif
     buffer[sizeof buffer - 1] = '\0';
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), buffer, lstrlenA(buffer), &bytes, 0);
 }

@@ -44,7 +44,7 @@ typedef unsigned long long vm_count_t;
 struct vm_config
 {
     vm_interface_t *interface;
-    vm_count_t cpu_count;
+    vm_count_t vcpu_count;
     vm_count_t memory_size;
 
     vm_count_t reserved[61];

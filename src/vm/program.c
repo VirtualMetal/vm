@@ -21,7 +21,7 @@ static int vm_run(int argc, char **argv)
     vm_t *instance = 0;
 
     memset(&config, 0, sizeof config);
-    config.cpu_count = 1;
+    config.vcpu_count = 1;
     config.memory_size = 4096;
 
     result = vm_create(&config, &instance);

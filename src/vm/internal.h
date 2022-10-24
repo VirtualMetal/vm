@@ -16,6 +16,11 @@
 
 #if defined(_WIN64)
 
+#if defined(_M_X64)
+#else
+#error unknown architecture
+#endif
+
 #include <windows.h>
 
 #undef RtlFillMemory
@@ -105,6 +110,11 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 }
 
 #elif defined(__linux__)
+
+#if defined(__x86_64__)
+#else
+#error unknown architecture
+#endif
 
 #define _GNU_SOURCE
 #include <errno.h>
