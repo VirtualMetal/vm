@@ -285,6 +285,84 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
     return VM_RESULT_SUCCESS;
 }
 
+vm_result_t vm_mread(vm_mmap_t *map,
+    vm_count_t offset, void *buffer, vm_count_t *plength)
+{
+    vm_count_t remain = *plength;
+    vm_count_t head_length = 0, tail_length = 0;
+    vm_count_t end_offset;
+
+    if (offset >= map->head_length)
+    {
+        offset -= map->head_length;
+        goto tail;
+    }
+
+    end_offset = offset + remain;
+    if (end_offset > map->head_length)
+        end_offset = map->head_length;
+
+    head_length = end_offset - offset;
+    memcpy(buffer, map->head + offset, head_length);
+
+    offset = 0;
+    remain -= head_length;
+
+tail:
+    if (offset >= map->tail_length)
+        goto exit;
+
+    end_offset = offset + remain;
+    if (end_offset > map->tail_length)
+        end_offset = map->tail_length;
+
+    tail_length = end_offset - offset;
+    memcpy((PUINT8)buffer + head_length, map->tail + offset, tail_length);
+
+exit:
+    *plength = head_length + tail_length;
+    return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_mwrite(vm_mmap_t *map,
+    void *buffer, vm_count_t offset, vm_count_t *plength)
+{
+    vm_count_t remain = *plength;
+    vm_count_t head_length = 0, tail_length = 0;
+    vm_count_t end_offset;
+
+    if (offset >= map->head_length)
+    {
+        offset -= map->head_length;
+        goto tail;
+    }
+
+    end_offset = offset + remain;
+    if (end_offset > map->head_length)
+        end_offset = map->head_length;
+
+    head_length = end_offset - offset;
+    memcpy(map->head + offset, buffer, head_length);
+
+    offset = 0;
+    remain -= head_length;
+
+tail:
+    if (offset >= map->tail_length)
+        goto exit;
+
+    end_offset = offset + remain;
+    if (end_offset > map->tail_length)
+        end_offset = map->tail_length;
+
+    tail_length = end_offset - offset;
+    memcpy(map->tail + offset, (PUINT8)buffer + head_length, tail_length);
+
+exit:
+    *plength = head_length + tail_length;
+    return VM_RESULT_SUCCESS;
+}
+
 vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;

@@ -124,6 +124,42 @@ vm_result_t vm_mmap(vm_t *instance,
 vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map);
 
 /**
+ * Read from a mapping.
+ *
+ * @param map
+ *     The mapping.
+ * @param offset
+ *     The offset within the mapping to read from.
+ * @param buffer
+ *     The buffer to read into.
+ * @param plength
+ *     On input it contains the length of the buffer. On output it receives
+ *     the number of bytes read.
+ * @return
+ *     VM_RESULT_SUCCESS.
+ */
+vm_result_t vm_mread(vm_mmap_t *map,
+    vm_count_t offset, void *buffer, vm_count_t *plength);
+
+/**
+ * Write to a mapping.
+ *
+ * @param map
+ *     The mapping.
+ * @param buffer
+ *     The buffer to write from.
+ * @param offset
+ *     The offset within the mapping to write into.
+ * @param plength
+ *     On input it contains the length of the buffer. On output it receives
+ *     the number of bytes written.
+ * @return
+ *     VM_RESULT_SUCCESS.
+ */
+vm_result_t vm_mwrite(vm_mmap_t *map,
+    void *buffer, vm_count_t offset, vm_count_t *plength);
+
+/**
  * Start a VM instance.
  *
  * This function starts and runs the instance virtual CPU's. It handles

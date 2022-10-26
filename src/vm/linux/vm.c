@@ -46,7 +46,7 @@ struct vm
 struct vm_mmap
 {
     int slot;
-    void *region;
+    uint8_t *region;
     uint64_t region_length;
     uint64_t guest_address;
     unsigned
@@ -316,6 +316,48 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
 
     free(map);
 
+    return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_mread(vm_mmap_t *map,
+    vm_count_t offset, void *buffer, vm_count_t *plength)
+{
+    vm_count_t length = 0;
+    vm_count_t end_offset;
+
+    if (offset >= map->region_length)
+        goto exit;
+
+    end_offset = offset + *plength;
+    if (end_offset > map->region_length)
+        end_offset = map->region_length;
+
+    length = end_offset - offset;
+    memcpy(buffer, map->region + offset, length);
+
+exit:
+    *plength = length;
+    return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_mwrite(vm_mmap_t *map,
+    void *buffer, vm_count_t offset, vm_count_t *plength)
+{
+    vm_count_t length = 0;
+    vm_count_t end_offset;
+
+    if (offset >= map->region_length)
+        goto exit;
+
+    end_offset = offset + *plength;
+    if (end_offset > map->region_length)
+        end_offset = map->region_length;
+
+    length = end_offset - offset;
+    memcpy(map->region + offset, buffer, length);
+
+exit:
+    *plength = length;
     return VM_RESULT_SUCCESS;
 }
 
