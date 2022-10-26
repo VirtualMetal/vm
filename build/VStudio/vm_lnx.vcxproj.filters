@@ -29,5 +29,8 @@
     <ClCompile Include="..\..\src\vm\linux\vm.c">
       <Filter>Source\linux</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\vm\run.c">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

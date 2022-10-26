@@ -19,15 +19,24 @@ struct vm
 {
     vm_config_t config;
     WHV_PARTITION_HANDLE partition;
-    void *memory;
-    unsigned debug_log_flags;
     SRWLOCK cancel_lock;
     HANDLE thread;                      /* protected by cancel_lock */
     vm_count_t thread_count;
     vm_result_t thread_result;
     unsigned
-        is_cancelled:1,                 /* protected by cancel_lock */
-        has_mapped_range:1;
+        is_cancelled:1;                 /* protected by cancel_lock */
+};
+
+struct vm_mmap
+{
+    PUINT8 head, tail;
+    UINT64 head_length, tail_length;
+    UINT64 guest_address;
+    unsigned
+        has_head:1,
+        has_mapped_head:1,
+        has_tail:1,
+        has_mapped_tail:1;
 };
 
 static void vm_thread_set_cancelled(HANDLE thread);
@@ -107,24 +116,6 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
-    instance->memory = VirtualAlloc(
-        0, instance->config.memory_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (0 == instance->memory)
-    {
-        result = vm_result(VM_ERROR_MEMORY, GetLastError());
-        goto exit;
-    }
-
-    hresult = WHvMapGpaRange(instance->partition,
-        instance->memory, 0, instance->config.memory_size,
-        WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
-    if (FAILED(hresult))
-    {
-        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
-        goto exit;
-    }
-    instance->has_mapped_range = 1;
-
     *pinstance = instance;
     result = VM_RESULT_SUCCESS;
 
@@ -137,12 +128,6 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
-    if (instance->has_mapped_range)
-        WHvUnmapGpaRange(instance->partition, 0, instance->config.memory_size);
-
-    if (0 != instance->memory)
-        VirtualFree(instance->memory, instance->config.memory_size, MEM_RELEASE);
-
     if (0 != instance->partition)
         WHvDeletePartition(instance->partition);
 
@@ -151,9 +136,151 @@ vm_result_t vm_delete(vm_t *instance)
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
+vm_result_t vm_mmap(vm_t *instance,
+    void *host_address, int file, vm_count_t guest_address, vm_count_t length,
+    vm_mmap_t **pmap)
 {
-    instance->debug_log_flags = flags;
+    vm_result_t result;
+    vm_mmap_t *map = 0;
+    HANDLE mapping = 0;
+    MEMORY_BASIC_INFORMATION mem_info;
+    HRESULT hresult;
+
+    *pmap = 0;
+
+    if (0 == length)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    map = malloc(sizeof *map);
+    if (0 == map)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    memset(map, 0, sizeof *map);
+    map->guest_address = guest_address;
+
+    if (0 == host_address && -1 == file)
+    {
+        map->head_length = length;
+        map->head = VirtualAlloc(0, length, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (0 == map->head)
+        {
+            result = vm_result(VM_ERROR_MEMORY, GetLastError());
+            goto exit;
+        }
+        map->has_head = 1;
+    }
+    else if (0 == host_address && -1 != file)
+    {
+        mapping = CreateFileMappingW((HANDLE)(UINT_PTR)file,
+            0, PAGE_WRITECOPY, 0, 0, 0);
+        if (0 == mapping)
+        {
+            result = vm_result(VM_ERROR_MEMORY, GetLastError());
+            goto exit;
+        }
+
+        map->head = MapViewOfFile(mapping, FILE_MAP_COPY, 0, 0, 0);
+        if (0 == map->head)
+        {
+            result = vm_result(VM_ERROR_MEMORY, GetLastError());
+            goto exit;
+        }
+        map->has_head = 1;
+
+        if (0 == VirtualQuery(map->head, &mem_info, sizeof mem_info))
+        {
+            result = vm_result(VM_ERROR_MEMORY, GetLastError());
+            goto exit;
+        }
+
+        map->head_length = mem_info.RegionSize;
+        if (length > map->head_length)
+        {
+            map->tail_length = length - mem_info.RegionSize;
+            map->tail = VirtualAlloc(0, map->tail_length, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+            if (0 == map->tail)
+            {
+                result = vm_result(VM_ERROR_MEMORY, GetLastError());
+                goto exit;
+            }
+            map->has_tail = 1;
+        }
+    }
+    else if (0 != host_address && -1 == file)
+    {
+        map->head_length = length;
+        map->head = host_address;
+    }
+    else if (0 != host_address && -1 != file)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    hresult = WHvMapGpaRange(instance->partition,
+        map->head, map->guest_address, map->head_length,
+        WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+        goto exit;
+    }
+    map->has_mapped_head = 1;
+
+    if (0 != map->tail)
+    {
+        hresult = WHvMapGpaRange(instance->partition,
+            map->tail, map->guest_address + map->head_length, map->tail_length,
+            WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+        map->has_mapped_tail = 1;
+    }
+
+    *pmap = map;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    if (0 != mapping)
+        CloseHandle(mapping);
+
+    if (!vm_result_check(result) && 0 != map)
+        vm_munmap(instance, map);
+
+    return result;
+}
+
+vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
+{
+    if (map->has_mapped_tail)
+    {
+        WHvUnmapGpaRange(instance->partition,
+            map->guest_address + map->head_length, map->tail_length);
+        WHvUnmapGpaRange(instance->partition,
+            map->guest_address, map->head_length);
+    }
+    else if (map->has_mapped_head)
+        WHvUnmapGpaRange(instance->partition,
+            map->guest_address, map->head_length);
+
+    if (map->has_tail)
+    {
+        VirtualFree(map->tail, 0, MEM_RELEASE);
+        UnmapViewOfFile(map->head);
+    }
+    else if (map->has_head)
+        VirtualFree(map->head, 0, MEM_RELEASE);
+
+    free(map);
 
     return VM_RESULT_SUCCESS;
 }
@@ -437,7 +564,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 #undef SQUASH
 
         result = dispatch[index](instance, &exit_context);
-        if (instance->debug_log_flags)
+        if (instance->config.debug_flags)
             vm_debug_log(vcpu_index, &exit_context, result);
         if (!vm_result_check(result))
             goto exit;

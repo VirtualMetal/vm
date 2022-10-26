@@ -1,7 +1,9 @@
 EXPORTS
+    vm_run
     vm_create
     vm_delete
-    vm_set_debug_log
+    vm_mmap
+    vm_munmap
     vm_start
     vm_wait
     vm_cancel

@@ -15,14 +15,21 @@
 #include <vm/internal.h>
 #include <linux/kvm.h>
 
+#define SLOT_COUNT                      1024                    /* <= page size */
+#define SLOT_MASK                       (SLOT_COUNT - 1)
+#define SLOT_BITMAP_ELEM_BITS           64
+#define SLOT_BITMAP_ELEM_COUNT          (SLOT_COUNT / SLOT_BITMAP_ELEM_BITS)
+
+#define SIG_VCPU_CANCEL                 SIGUSR1
+
 struct vm
 {
     vm_config_t config;
     int hv_fd;
     int vm_fd;
     int vcpu_run_size;
-    void *memory;
-    unsigned debug_log_flags;
+    pthread_mutex_t slot_lock;
+    int64_t slot_bitmap[SLOT_BITMAP_ELEM_COUNT];
     pthread_mutex_t cancel_lock;
     pthread_barrier_t barrier;
     pthread_t thread;                   /* protected by cancel_lock */
@@ -30,10 +37,22 @@ struct vm
     vm_result_t thread_result;
     unsigned
         is_cancelled:1,                 /* protected by cancel_lock */
+        has_slot_lock:1,
         has_cancel_lock:1,
         has_barrier:1,
-        has_memory_region:1,
         has_thread:1;                   /* protected by cancel_lock */
+};
+
+struct vm_mmap
+{
+    int slot;
+    void *region;
+    uint64_t region_length;
+    uint64_t guest_address;
+    unsigned
+        has_slot:1,
+        has_region:1,
+        has_mapped_region:1;
 };
 
 static void *vm_thread(void *instance0);
@@ -43,8 +62,6 @@ static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
 static void vm_debug_log(unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
-
-#define SIG_VCPU_CANCEL                 SIGUSR1
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -65,7 +82,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->config = *config;
     instance->hv_fd = -1;
     instance->vm_fd = -1;
-    instance->memory = MAP_FAILED;
+    for (int i = 0; SLOT_BITMAP_ELEM_COUNT > i; i++)
+        instance->slot_bitmap[i] = -1LL;
 
     if (0 == instance->config.vcpu_count)
     {
@@ -80,6 +98,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
     if (0 == instance->config.vcpu_count)
         instance->config.vcpu_count = 1;
+
+    error = pthread_mutex_init(&instance->slot_lock, 0);
+    if (0 != error)
+    {
+        result = vm_result(VM_ERROR_MEMORY, error);
+        goto exit;
+    }
+    instance->has_slot_lock = 1;
 
     error = pthread_mutex_init(&instance->cancel_lock, 0);
     if (0 != error)
@@ -131,26 +157,6 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
-    instance->memory = mmap(
-        0, instance->config.memory_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    if (MAP_FAILED == instance->memory)
-    {
-        result = vm_result(VM_ERROR_MEMORY, errno);
-        goto exit;
-    }
-
-    struct kvm_userspace_memory_region region;
-    memset(&region, 0, sizeof region);
-    region.guest_phys_addr = 0;
-    region.memory_size = instance->config.memory_size;
-    region.userspace_addr = (__u64)instance->memory;
-    if (-1 == ioctl(instance->vm_fd, KVM_SET_USER_MEMORY_REGION, &region))
-    {
-        result = vm_result(VM_ERROR_HYPERVISOR, errno);
-        goto exit;
-    }
-    instance->has_memory_region = 1;
-
     *pinstance = instance;
     result = VM_RESULT_SUCCESS;
 
@@ -163,16 +169,6 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
-    if (instance->has_memory_region)
-    {
-        struct kvm_userspace_memory_region region;
-        memset(&region, 0, sizeof region);
-        ioctl(instance->vm_fd, KVM_SET_USER_MEMORY_REGION, &region);
-    }
-
-    if (MAP_FAILED != instance->memory)
-        munmap(instance->memory, instance->config.memory_size);
-
     if (-1 != instance->vm_fd)
         close(instance->vm_fd);
 
@@ -185,14 +181,140 @@ vm_result_t vm_delete(vm_t *instance)
     if (instance->has_cancel_lock)
         pthread_mutex_destroy(&instance->cancel_lock);
 
+    if (instance->has_slot_lock)
+        pthread_mutex_destroy(&instance->slot_lock);
+
     free(instance);
 
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_set_debug_log(vm_t *instance, unsigned flags)
+vm_result_t vm_mmap(vm_t *instance,
+    void *host_address, int file, vm_count_t guest_address, vm_count_t length,
+    vm_mmap_t **pmap)
 {
-    instance->debug_log_flags = flags;
+    vm_result_t result;
+    vm_mmap_t *map = 0;
+    struct kvm_userspace_memory_region region;
+
+    *pmap = 0;
+
+    if (0 == length)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    map = malloc(sizeof *map);
+    if (0 == map)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    memset(map, 0, sizeof *map);
+    map->guest_address = guest_address;
+
+    pthread_mutex_lock(&instance->slot_lock);
+    for (int i = 0; SLOT_BITMAP_ELEM_COUNT > i; i++)
+    {
+        int s = __builtin_ffsll(instance->slot_bitmap[i]);
+        if (0 != s)
+        {
+            s--;
+            map->slot = i * SLOT_BITMAP_ELEM_BITS + s;
+            map->has_slot = 1;
+            instance->slot_bitmap[i] &= ~(1 << s);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&instance->slot_lock);
+    if (!map->has_slot)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    if (0 == host_address && -1 == file)
+    {
+        map->region_length = length;
+        map->region = mmap(
+            0, length, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        if (MAP_FAILED == map->region)
+        {
+            result = vm_result(VM_ERROR_MEMORY, errno);
+            goto exit;
+        }
+        map->has_region = 1;
+    }
+    else if (0 == host_address && -1 != file)
+    {
+        map->region_length = length;
+        map->region = mmap(
+            0, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_NORESERVE, file, 0);
+        if (MAP_FAILED == map->region)
+        {
+            result = vm_result(VM_ERROR_MEMORY, errno);
+            goto exit;
+        }
+        map->has_region = 1;
+    }
+    else if (0 != host_address && -1 == file)
+    {
+        map->region_length = length;
+        map->region = host_address;
+    }
+    else if (0 != host_address && -1 != file)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    memset(&region, 0, sizeof region);
+    region.slot = (__u32)map->slot;
+    region.guest_phys_addr = map->guest_address;
+    region.memory_size = map->region_length;
+    region.userspace_addr = (__u64)map->region;
+    if (-1 == ioctl(instance->vm_fd, KVM_SET_USER_MEMORY_REGION, &region))
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, errno);
+        goto exit;
+    }
+    map->has_mapped_region = 1;
+
+    *pmap = map;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    if (!vm_result_check(result) && 0 != map)
+        vm_munmap(instance, map);
+
+    return result;
+}
+
+vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
+{
+    struct kvm_userspace_memory_region region;
+
+    if (map->has_mapped_region)
+    {
+        memset(&region, 0, sizeof region);
+        region.slot = (__u32)map->slot;
+        ioctl(instance->vm_fd, KVM_SET_USER_MEMORY_REGION, &region);
+    }
+
+    if (map->has_region)
+        munmap(map->region, map->region_length);
+
+    if (map->has_slot)
+    {
+        pthread_mutex_lock(&instance->slot_lock);
+        instance->slot_bitmap[map->slot / SLOT_BITMAP_ELEM_BITS] |=
+            1 << (map->slot % SLOT_BITMAP_ELEM_BITS);
+        pthread_mutex_unlock(&instance->slot_lock);
+    }
+
+    free(map);
 
     return VM_RESULT_SUCCESS;
 }
@@ -413,7 +535,7 @@ static void *vm_thread(void *instance0)
 #undef SQUASH
 
         result = dispatch[index](instance, vcpu_run);
-        if (instance->debug_log_flags)
+        if (instance->config.debug_flags)
             vm_debug_log(vcpu_index, vcpu_run, result);
         if (!vm_result_check(result))
             goto exit;

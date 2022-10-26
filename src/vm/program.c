@@ -14,38 +14,13 @@
 #include <vm/vm.h>
 #include <vm/internal.h>
 
-static int vm_run(int argc, char **argv)
-{
-    vm_result_t result;
-    vm_config_t config;
-    vm_t *instance = 0;
-
-    memset(&config, 0, sizeof config);
-    config.vcpu_count = 1;
-    config.memory_size = 4096;
-
-    result = vm_create(&config, &instance);
-    if (!vm_result_check(result))
-        goto exit;
-
-    vm_set_debug_log(instance, (unsigned)-1);
-
-    result = vm_start(instance);
-    if (!vm_result_check(result))
-        goto exit;
-
-    result = vm_wait(instance);
-
-exit:
-    if (0 != instance)
-        vm_delete(instance);
-
-    return vm_result_check(result) ? 0 : 1;
-}
-
 int main(int argc, char **argv)
 {
-    return vm_run(argc, argv);
+    vm_result_t result;
+
+    result = vm_run(argv + 1);
+
+    return vm_result_check(result) ? 0 : 1;
 }
 
 EXEMAIN;
