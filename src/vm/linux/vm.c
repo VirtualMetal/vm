@@ -195,11 +195,20 @@ vm_result_t vm_mmap(vm_t *instance,
 {
     vm_result_t result;
     vm_mmap_t *map = 0;
+    size_t page_size;
+    struct stat stbuf;
+    uint8_t *head;
+    uint64_t head_length;
     struct kvm_userspace_memory_region region;
 
     *pmap = 0;
 
-    if (0 == length)
+    page_size = (size_t)getpagesize();
+    length = (length + page_size - 1) & ~(page_size - 1);
+
+    if (0 != ((uintptr_t)host_address & (page_size - 1)) ||
+        0 != (guest_address & (page_size - 1)) ||
+        0 == length)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -249,15 +258,33 @@ vm_result_t vm_mmap(vm_t *instance,
     }
     else if (0 == host_address && -1 != file)
     {
+        if (-1 == fstat(file, &stbuf))
+        {
+            result = vm_result(VM_ERROR_FILE, errno);
+            goto exit;
+        }
+
         map->region_length = length;
         map->region = mmap(
-            0, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_NORESERVE, file, 0);
+            0, length, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         if (MAP_FAILED == map->region)
         {
             result = vm_result(VM_ERROR_MEMORY, errno);
             goto exit;
         }
         map->has_region = 1;
+
+        head_length = ((size_t)stbuf.st_size + page_size - 1) & ~(page_size - 1);
+        if (head_length > length)
+            head_length = length;
+
+        head = mmap(
+            map->region, head_length, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE, file, 0);
+        if (MAP_FAILED == head)
+        {
+            result = vm_result(VM_ERROR_MEMORY, errno);
+            goto exit;
+        }
     }
     else if (0 != host_address && -1 == file)
     {

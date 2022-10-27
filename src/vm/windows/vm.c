@@ -142,13 +142,19 @@ vm_result_t vm_mmap(vm_t *instance,
 {
     vm_result_t result;
     vm_mmap_t *map = 0;
+    SYSTEM_INFO sys_info;
     HANDLE mapping = 0;
     MEMORY_BASIC_INFORMATION mem_info;
     HRESULT hresult;
 
     *pmap = 0;
 
-    if (0 == length)
+    GetSystemInfo(&sys_info);
+    length = (length + sys_info.dwPageSize - 1) & ~(sys_info.dwPageSize - 1);
+
+    if (0 != ((UINT_PTR)host_address & (sys_info.dwPageSize - 1)) ||
+        0 != (guest_address & (sys_info.dwPageSize - 1)) ||
+        0 == length)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -202,7 +208,7 @@ vm_result_t vm_mmap(vm_t *instance,
         map->head_length = mem_info.RegionSize;
         if (length > map->head_length)
         {
-            map->tail_length = length - mem_info.RegionSize;
+            map->tail_length = length - map->head_length;
             map->tail = VirtualAlloc(0, map->tail_length, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
             if (0 == map->tail)
             {
@@ -233,7 +239,7 @@ vm_result_t vm_mmap(vm_t *instance,
     }
     map->has_mapped_head = 1;
 
-    if (0 != map->tail)
+    if (map->has_tail)
     {
         hresult = WHvMapGpaRange(instance->partition,
             map->tail, map->guest_address + map->head_length, map->tail_length,
