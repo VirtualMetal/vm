@@ -22,14 +22,11 @@ vm_result_t vm_run(char **text_config)
     vm_config_t config;
     vm_t *instance = 0;
     vm_count_t guest_address, length;
+    vm_mmap_t *map;
     int file;
-    vm_mmap_t *mmap[64];
-    unsigned mmap_count = 0;
 
     memset(&config, 0, sizeof config);
     config.vcpu_count = 1;
-
-    memset(mmap, 0, sizeof mmap);
 
     for (char **pp = text_config, *p = *pp++; p; p = *pp++)
     {
@@ -51,8 +48,6 @@ vm_result_t vm_run(char **text_config)
     {
         if (CONFIGVAL(p, "mmap"))
         {
-            file = -1;
-
             guest_address = strtoullint(p, &p, 0, 1);
             if (',' != *p)
                 continue;
@@ -60,6 +55,7 @@ vm_result_t vm_run(char **text_config)
             if (',' != *p && '\0' != *p)
                 continue;
 
+            file = -1;
             if (',' == *p)
             {
                 file = open(p + 1, O_RDONLY);
@@ -70,15 +66,14 @@ vm_result_t vm_run(char **text_config)
                 }
             }
 
-            result = vm_mmap(instance, 0, file, guest_address, length, &mmap[mmap_count]);
+            result = vm_mmap(instance, 0, file, guest_address, length, &map);
+                /* do not track map; vm_delete will free it */
 
             if (',' == *p)
                 close(file);
 
             if (!vm_result_check(result))
                 goto exit;
-
-            mmap_count++;
         }
     }
 
@@ -89,9 +84,6 @@ vm_result_t vm_run(char **text_config)
     result = vm_wait(instance);
 
 exit:
-    while (mmap_count--)
-        vm_munmap(instance, mmap[mmap_count]);
-
     if (0 != instance)
         vm_delete(instance);
 

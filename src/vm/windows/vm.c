@@ -19,6 +19,8 @@ struct vm
 {
     vm_config_t config;
     WHV_PARTITION_HANDLE partition;
+    SRWLOCK mmap_lock;
+    list_link_t mmap_list;              /* protected by mmap_lock */
     SRWLOCK cancel_lock;
     HANDLE thread;                      /* protected by cancel_lock */
     vm_count_t thread_count;
@@ -29,6 +31,7 @@ struct vm
 
 struct vm_mmap
 {
+    list_link_t mmap_link;              /* protected by mmap_lock */
     PUINT8 head, tail;
     UINT64 head_length, tail_length;
     UINT64 guest_address;
@@ -76,6 +79,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    InitializeSRWLock(&instance->mmap_lock);
+    list_init(&instance->mmap_list);
     InitializeSRWLock(&instance->cancel_lock);
 
     if (0 == instance->config.vcpu_count)
@@ -128,6 +133,9 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
+    while (!list_is_empty(&instance->mmap_list))
+        vm_munmap(instance, (vm_mmap_t *)instance->mmap_list.next);
+
     if (0 != instance->partition)
         WHvDeletePartition(instance->partition);
 
@@ -168,6 +176,8 @@ vm_result_t vm_mmap(vm_t *instance,
     }
 
     memset(map, 0, sizeof *map);
+    list_init(&map->mmap_link);
+        /* ensure that vm_munmap works even if we do not insert into the instance->mmap_list */
     map->guest_address = guest_address;
 
     if (0 == host_address && -1 == file)
@@ -252,6 +262,10 @@ vm_result_t vm_mmap(vm_t *instance,
         map->has_mapped_tail = 1;
     }
 
+    AcquireSRWLockExclusive(&instance->mmap_lock);
+    list_insert_after(&instance->mmap_list, &map->mmap_link);
+    ReleaseSRWLockExclusive(&instance->mmap_lock);
+
     *pmap = map;
     result = VM_RESULT_SUCCESS;
 
@@ -267,6 +281,10 @@ exit:
 
 vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
 {
+    AcquireSRWLockExclusive(&instance->mmap_lock);
+    list_remove(&map->mmap_link);
+    ReleaseSRWLockExclusive(&instance->mmap_lock);
+
     if (map->has_mapped_tail)
     {
         WHvUnmapGpaRange(instance->partition,

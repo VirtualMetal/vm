@@ -275,4 +275,75 @@ VM_INTERNAL_STRNCMP(invariant_strnicmp, char, invariant_toupper)
 VM_INTERNAL_STRTOINT(strtoullint, char, unsigned long long int)
 #undef VM_INTERNAL_STRTOINT
 
+/*
+ * linked lists
+ */
+
+typedef struct list_link
+{
+    struct list_link *next, *prev;
+} list_link_t;
+
+static inline
+void list_init(list_link_t *list)
+{
+    list->next = list;
+    list->prev = list;
+}
+
+static inline
+int list_is_empty(list_link_t *list)
+{
+    return list->next == list;
+}
+
+static inline
+void list_insert_after(list_link_t *list, list_link_t *link)
+{
+    list_link_t *next = list->next;
+    link->next = next;
+    link->prev = list;
+    next->prev = link;
+    list->next = link;
+}
+
+static inline
+void list_insert_before(list_link_t *list, list_link_t *link)
+{
+    list_link_t *prev = list->prev;
+    link->next = list;
+    link->prev = prev;
+    prev->next = link;
+    list->prev = link;
+}
+
+static inline
+list_link_t *list_remove_after(list_link_t *list)
+{
+    list_link_t *link = list->next;
+    list_link_t *next = link->next;
+    list->next = next;
+    next->prev = list;
+    return link;
+}
+
+static inline
+list_link_t *list_remove_before(list_link_t *list)
+{
+    list_link_t *link = list->prev;
+    list_link_t *prev = link->prev;
+    prev->next = list;
+    list->prev = prev;
+    return link;
+}
+
+static inline
+void list_remove(list_link_t *link)
+{
+    list_link_t *next = link->next;
+    list_link_t *prev = link->prev;
+    next->prev = prev;
+    prev->next = next;
+}
+
 #endif

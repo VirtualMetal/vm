@@ -28,8 +28,9 @@ struct vm
     int hv_fd;
     int vm_fd;
     int vcpu_run_size;
-    pthread_mutex_t slot_lock;
-    int64_t slot_bitmap[SLOT_BITMAP_ELEM_COUNT];
+    pthread_mutex_t mmap_lock;
+    list_link_t mmap_list;              /* protected by mmap_lock */
+    int64_t slot_bitmap[SLOT_BITMAP_ELEM_COUNT];    /* ditto */
     pthread_mutex_t cancel_lock;
     pthread_barrier_t barrier;
     pthread_t thread;                   /* protected by cancel_lock */
@@ -37,7 +38,7 @@ struct vm
     vm_result_t thread_result;
     unsigned
         is_cancelled:1,                 /* protected by cancel_lock */
-        has_slot_lock:1,
+        has_mmap_lock:1,
         has_cancel_lock:1,
         has_barrier:1,
         has_thread:1;                   /* protected by cancel_lock */
@@ -45,6 +46,7 @@ struct vm
 
 struct vm_mmap
 {
+    list_link_t mmap_link;              /* protected by mmap_lock */
     int slot;
     uint8_t *region;
     uint64_t region_length;
@@ -82,6 +84,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->config = *config;
     instance->hv_fd = -1;
     instance->vm_fd = -1;
+    list_init(&instance->mmap_list);
     for (int i = 0; SLOT_BITMAP_ELEM_COUNT > i; i++)
         instance->slot_bitmap[i] = -1LL;
 
@@ -99,13 +102,13 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     if (0 == instance->config.vcpu_count)
         instance->config.vcpu_count = 1;
 
-    error = pthread_mutex_init(&instance->slot_lock, 0);
+    error = pthread_mutex_init(&instance->mmap_lock, 0);
     if (0 != error)
     {
         result = vm_result(VM_ERROR_MEMORY, error);
         goto exit;
     }
-    instance->has_slot_lock = 1;
+    instance->has_mmap_lock = 1;
 
     error = pthread_mutex_init(&instance->cancel_lock, 0);
     if (0 != error)
@@ -169,6 +172,9 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
+    while (!list_is_empty(&instance->mmap_list))
+        vm_munmap(instance, (vm_mmap_t *)instance->mmap_list.next);
+
     if (-1 != instance->vm_fd)
         close(instance->vm_fd);
 
@@ -181,8 +187,8 @@ vm_result_t vm_delete(vm_t *instance)
     if (instance->has_cancel_lock)
         pthread_mutex_destroy(&instance->cancel_lock);
 
-    if (instance->has_slot_lock)
-        pthread_mutex_destroy(&instance->slot_lock);
+    if (instance->has_mmap_lock)
+        pthread_mutex_destroy(&instance->mmap_lock);
 
     free(instance);
 
@@ -222,9 +228,11 @@ vm_result_t vm_mmap(vm_t *instance,
     }
 
     memset(map, 0, sizeof *map);
+    list_init(&map->mmap_link);
+        /* ensure that vm_munmap works even if we do not insert into the instance->mmap_list */
     map->guest_address = guest_address;
 
-    pthread_mutex_lock(&instance->slot_lock);
+    pthread_mutex_lock(&instance->mmap_lock);
     for (int i = 0; SLOT_BITMAP_ELEM_COUNT > i; i++)
     {
         int s = __builtin_ffsll(instance->slot_bitmap[i]);
@@ -237,7 +245,7 @@ vm_result_t vm_mmap(vm_t *instance,
             break;
         }
     }
-    pthread_mutex_unlock(&instance->slot_lock);
+    pthread_mutex_unlock(&instance->mmap_lock);
     if (!map->has_slot)
     {
         result = vm_result(VM_ERROR_MEMORY, 0);
@@ -309,6 +317,10 @@ vm_result_t vm_mmap(vm_t *instance,
     }
     map->has_mapped_region = 1;
 
+    pthread_mutex_lock(&instance->mmap_lock);
+    list_insert_after(&instance->mmap_list, &map->mmap_link);
+    pthread_mutex_unlock(&instance->mmap_lock);
+
     *pmap = map;
     result = VM_RESULT_SUCCESS;
 
@@ -323,6 +335,10 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
 {
     struct kvm_userspace_memory_region region;
 
+    pthread_mutex_lock(&instance->mmap_lock);
+    list_remove(&map->mmap_link);
+    pthread_mutex_unlock(&instance->mmap_lock);
+
     if (map->has_mapped_region)
     {
         memset(&region, 0, sizeof region);
@@ -335,10 +351,10 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
 
     if (map->has_slot)
     {
-        pthread_mutex_lock(&instance->slot_lock);
+        pthread_mutex_lock(&instance->mmap_lock);
         instance->slot_bitmap[map->slot / SLOT_BITMAP_ELEM_BITS] |=
             1 << (map->slot % SLOT_BITMAP_ELEM_BITS);
-        pthread_mutex_unlock(&instance->slot_lock);
+        pthread_mutex_unlock(&instance->mmap_lock);
     }
 
     free(map);
