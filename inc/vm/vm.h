@@ -44,9 +44,9 @@ typedef unsigned long long vm_count_t;
 
 struct vm_config
 {
-    vm_count_t debug_flags;
-    vm_count_t vcpu_count;
-    vm_count_t vcpu_entry;
+    vm_count_t debug_flags;             /* debug flags */
+    vm_count_t vcpu_count;              /* number of virtual cpu's */
+    vm_count_t vcpu_entry;              /* virtual cpu entry point */
 
     vm_count_t reserved[61];
 };
