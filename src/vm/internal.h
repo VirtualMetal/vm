@@ -228,6 +228,7 @@ VM_INTERNAL_STRNCMP(invariant_strnicmp, char, invariant_toupper)
         int maxdig, maxalp, sign = +1;\
         if (0 > base)\
         {\
+            base = -base;\
             if ('+' == *p)\
                 p++;\
             else if ('-' == *p)\
