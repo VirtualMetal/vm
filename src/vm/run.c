@@ -16,28 +16,47 @@
 
 vm_result_t vm_run(char **text_config)
 {
-#define CONFIGVAL(p, S)                 (0 == invariant_strncmp(p, S "=", sizeof S) ? ((p) += sizeof S) : 0)
+    /* text parsing macros */
+#define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) ? (p += sizeof S) : 0)
+#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, (pp - text_config) + 1); goto exit; }
+    /* page offset macro -- works for AMD64; also for ARM64 with a 4KB granule */
+#define PGO(P,L)(((P) & (0x0000ff8000000000ULL >> (((L) - 1) * 9))) >> (48 - (L) * 9) << 3)
 
     vm_result_t result;
     vm_config_t config;
     vm_t *instance = 0;
-    vm_count_t guest_address, length;
+    vm_count_t guest_address, length, page_address;
     vm_mmap_t *map;
-    int file;
+    int file, page_level;
 
     memset(&config, 0, sizeof config);
     config.vcpu_count = 1;
 
     for (char **pp = text_config, *p = *pp++; p; p = *pp++)
     {
-        if (CONFIGVAL(p, "debug"))
-            config.debug_flags = strtoullint(p, 0, 0, 1);
+        if (CMD("debug"))
+        {
+            config.debug_flags = strtoullint(p, &p, -1);
+            CHK('\0' == *p);
+        }
         else
-        if (CONFIGVAL(p, "vcpu"))
-            config.vcpu_count = strtoullint(p, 0, 0, 1);
+        if (CMD("vcpu"))
+        {
+            config.vcpu_count = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
         else
-        if (CONFIGVAL(p, "entry"))
-            config.vcpu_entry = strtoullint(p, 0, 0, 1);
+        if (CMD("entry"))
+        {
+            config.vcpu_entry = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
+        else
+        if (CMD("pg0"))
+        {
+            config.page_table = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
     }
 
     result = vm_create(&config, &instance);
@@ -46,14 +65,12 @@ vm_result_t vm_run(char **text_config)
 
     for (char **pp = text_config, *p = *pp++; p; p = *pp++)
     {
-        if (CONFIGVAL(p, "mmap"))
+        if (CMD("mmap"))
         {
-            guest_address = strtoullint(p, &p, 0, 1);
-            if (',' != *p)
-                continue;
-            length = strtoullint(p + 1, &p, 0, 1);
-            if (',' != *p && '\0' != *p)
-                continue;
+            guest_address = strtoullint(p, &p, +1);
+            CHK(',' == *p);
+            length = strtoullint(p + 1, &p, +1);
+            CHK(',' == *p || '\0' == *p);
 
             file = -1;
             if (',' == *p)
@@ -77,6 +94,40 @@ vm_result_t vm_run(char **text_config)
         }
     }
 
+    for (char **pp = text_config, *p = *pp++; p; p = *pp++)
+    {
+        if (CMD("pg1") || CMD("pg2") || CMD("pg3") || CMD("pg4"))
+        {
+            page_level = p[-2] - '0';
+            guest_address = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+
+            page_address = config.page_table;
+            for (int level = 1; page_level >= level; level++)
+            {
+                if (page_level > level)
+                {
+                    length = sizeof page_address;
+                    vm_mread(instance,
+                        page_address + PGO(guest_address, level),
+                        &page_address,
+                        &length);
+                    CHK(sizeof page_address == length);
+                    page_address &= 0x000ffffffffff000ULL;
+                }
+                else
+                {
+                    length = sizeof guest_address;
+                    vm_mwrite(instance,
+                        &guest_address,
+                        page_address + PGO(guest_address, level),
+                        &length);
+                    CHK(sizeof guest_address == length);
+                }
+            }
+        }
+    }
+
     result = vm_start(instance);
     if (!vm_result_check(result))
         goto exit;
@@ -89,5 +140,7 @@ exit:
 
     return result;
 
-#undef CONFIGVAL
+#undef CMD
+#undef CHK
+#undef PGO
 }

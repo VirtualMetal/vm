@@ -19,8 +19,13 @@ int main(int argc, char **argv)
     vm_result_t result;
 
     result = vm_run(argv + 1);
-
-    return vm_result_check(result) ? 0 : 1;
+    if (vm_result_check(result))
+        return 0;
+    else if (VM_ERROR_MISUSE != vm_result_error(result))
+        return 1;
+    else
+        // warn("bad argument #%u", (unsigned)vm_result_reason(result));
+        return 2;
 }
 
 EXEMAIN;

@@ -362,7 +362,7 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_mread(vm_mmap_t *map,
+vm_result_t vm_mmap_read(vm_mmap_t *map,
     vm_count_t offset, void *buffer, vm_count_t *plength)
 {
     vm_count_t length = 0;
@@ -383,7 +383,7 @@ exit:
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_mwrite(vm_mmap_t *map,
+vm_result_t vm_mmap_write(vm_mmap_t *map,
     void *buffer, vm_count_t offset, vm_count_t *plength)
 {
     vm_count_t length = 0;
@@ -400,6 +400,56 @@ vm_result_t vm_mwrite(vm_mmap_t *map,
     memcpy(map->region + offset, buffer, length);
 
 exit:
+    *plength = length;
+    return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_mread(vm_t *instance,
+    vm_count_t guest_address, void *buffer, vm_count_t *plength)
+{
+    vm_count_t length = 0;
+
+    pthread_mutex_lock(&instance->mmap_lock);
+
+    list_traverse(link, next, &instance->mmap_list)
+    {
+        vm_mmap_t *map = (vm_mmap_t *)link;
+        if (map->guest_address <= guest_address &&
+            guest_address < map->guest_address + map->region_length)
+        {
+            length = *plength;
+            vm_mmap_read(map, guest_address - map->guest_address, buffer, &length);
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&instance->mmap_lock);
+
+    *plength = length;
+    return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_mwrite(vm_t *instance,
+    void *buffer, vm_count_t guest_address, vm_count_t *plength)
+{
+    vm_count_t length = 0;
+
+    pthread_mutex_lock(&instance->mmap_lock);
+
+    list_traverse(link, next, &instance->mmap_list)
+    {
+        vm_mmap_t *map = (vm_mmap_t *)link;
+        if (map->guest_address <= guest_address &&
+            guest_address < map->guest_address + map->region_length)
+        {
+            length = *plength;
+            vm_mmap_write(map, buffer, guest_address - map->guest_address, &length);
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&instance->mmap_lock);
+
     *plength = length;
     return VM_RESULT_SUCCESS;
 }

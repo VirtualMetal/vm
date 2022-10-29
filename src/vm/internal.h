@@ -222,19 +222,18 @@ VM_INTERNAL_STRNCMP(invariant_strnicmp, char, invariant_toupper)
 
 #define VM_INTERNAL_STRTOINT(NAME, CTYPE, ITYPE)\
     static inline\
-    ITYPE NAME(const CTYPE *p, CTYPE **endp, unsigned base, int is_signed)\
+    ITYPE NAME(const CTYPE *p, CTYPE **endp, int base)\
     {\
         ITYPE v;\
-        unsigned maxdig, maxalp;\
-        int sign = +1;\
-        if (is_signed)\
+        int maxdig, maxalp, sign = +1;\
+        if (0 > base)\
         {\
             if ('+' == *p)\
                 p++;\
             else if ('-' == *p)\
                 p++, sign = -1;\
         }\
-        if (0 == base)\
+        if (2 > base)\
         {\
             if ('0' == *p)\
             {\
@@ -252,18 +251,18 @@ VM_INTERNAL_STRNCMP(invariant_strnicmp, char, invariant_toupper)
                 base = 10;\
             }\
         }\
-        maxdig = 10 < base ? 9 : base - 1;\
-        maxalp = 10 < base ? base - 11 : 0;\
+        maxdig = 10 < base ? '9' : (base - 1) + '0';\
+        maxalp = 10 < base ? (base - 1 - 10) + 'a' : 0;\
         for (v = 0; *p; p++)\
         {\
-            unsigned c = (unsigned)*p;\
-            if (c - '0' <= maxdig)\
-                v = base * v + (c - '0');\
+            int c = *p;\
+            if ('0' <= c && c <= maxdig)\
+                v = (ITYPE)base * v + (ITYPE)(c - '0');\
             else\
             {\
                 c |= 0x20;\
-                if (c - 'a' <= maxalp)\
-                    v = base * v + (c - 'a') + 10;\
+                if ('a' <= c && c <= maxalp)\
+                    v = (ITYPE)base * v + (ITYPE)(c - 'a') + 10;\
                 else\
                     break;\
             }\
@@ -345,5 +344,9 @@ void list_remove(list_link_t *link)
     next->prev = prev;
     prev->next = next;
 }
+
+#define list_traverse(i, dir, l)        \
+    for (list_link_t *i = (l)->dir, *i##__list_temp__; i != (l); i = i##__list_temp__)\
+        if (i##__list_temp__ = i->dir, 0) ; else
 
 #endif

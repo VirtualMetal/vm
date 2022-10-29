@@ -47,8 +47,9 @@ struct vm_config
     vm_count_t debug_flags;             /* debug flags */
     vm_count_t vcpu_count;              /* number of virtual cpu's */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
+    vm_count_t page_table;              /* page table address */
 
-    vm_count_t reserved[61];
+    vm_count_t reserved[60];
 };
 
 /**
@@ -138,7 +139,7 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map);
  * @return
  *     VM_RESULT_SUCCESS.
  */
-vm_result_t vm_mread(vm_mmap_t *map,
+vm_result_t vm_mmap_read(vm_mmap_t *map,
     vm_count_t offset, void *buffer, vm_count_t *plength);
 
 /**
@@ -156,8 +157,62 @@ vm_result_t vm_mread(vm_mmap_t *map,
  * @return
  *     VM_RESULT_SUCCESS.
  */
-vm_result_t vm_mwrite(vm_mmap_t *map,
+vm_result_t vm_mmap_write(vm_mmap_t *map,
     void *buffer, vm_count_t offset, vm_count_t *plength);
+
+/**
+ * Read from guest memory.
+ *
+ * This function has some limitations:
+ *
+ * - It cannot be used to cross memory mapping boundaries. All accessed
+ * memory must be contained within a single memory mapping.
+ *
+ * - It is intended to be used primarily for instance configuration and
+ * should not be used on critical paths. It performs a linear search of
+ * memory mappings and is slow.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param guest_address
+ *     The guest address to read from.
+ * @param buffer
+ *     The buffer to read into.
+ * @param plength
+ *     On input it contains the length of the buffer. On output it receives
+ *     the number of bytes read.
+ * @return
+ *     VM_RESULT_SUCCESS.
+ */
+vm_result_t vm_mread(vm_t *instance,
+    vm_count_t guest_address, void *buffer, vm_count_t *plength);
+
+/**
+ * Write to guest memory.
+ *
+ * This function has some limitations:
+ *
+ * - It cannot be used to cross memory mapping boundaries. All accessed
+ * memory must be contained within a single memory mapping.
+ *
+ * - It is intended to be used primarily for instance configuration and
+ * should not be used on critical paths. It performs a linear search of
+ * memory mappings and is slow.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param buffer
+ *     The buffer to write from.
+ * @param guest_address
+ *     The guest address to write into.
+ * @param plength
+ *     On input it contains the length of the buffer. On output it receives
+ *     the number of bytes written.
+ * @return
+ *     VM_RESULT_SUCCESS.
+ */
+vm_result_t vm_mwrite(vm_t *instance,
+    void *buffer, vm_count_t guest_address, vm_count_t *plength);
 
 /**
  * Start a VM instance.

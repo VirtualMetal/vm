@@ -4,6 +4,10 @@ EXPORTS
     vm_delete
     vm_mmap
     vm_munmap
+    vm_mmap_read
+    vm_mmap_write
+    vm_mread
+    vm_mwrite
     vm_start
     vm_wait
     vm_cancel
