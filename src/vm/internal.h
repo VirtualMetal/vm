@@ -80,8 +80,15 @@ void free(void *Pointer)
 }
 
 /*
- * open / close
+ * POSIX-like file I/O
  */
+
+typedef SSIZE_T ssize_t;
+typedef SSIZE_T off_t;
+
+#define STDIN_FILENO                    ((int)(UINT_PTR)GetStdHandle(STD_INPUT_HANDLE))
+#define STDOUT_FILENO                   ((int)(UINT_PTR)GetStdHandle(STD_OUTPUT_HANDLE))
+#define STDERR_FILENO                   ((int)(UINT_PTR)GetStdHandle(STD_ERROR_HANDLE))
 
 #define O_RDONLY                        _O_RDONLY
 #define O_WRONLY                        _O_WRONLY
@@ -112,6 +119,61 @@ static inline
 int close(int fd)
 {
     return CloseHandle((HANDLE)(UINT_PTR)fd) ? 0 : -1;
+}
+
+static inline
+ssize_t pread(int fd, void *buf, size_t nbyte, off_t offset)
+{
+    HANDLE h = (HANDLE)(UINT_PTR)fd;
+    OVERLAPPED Overlapped = { 0 };
+    DWORD BytesTransferred;
+    Overlapped.Offset = (DWORD)offset;
+    Overlapped.OffsetHigh = (DWORD)((size_t)offset >> 32);
+    if (!ReadFile(h, buf, (DWORD)nbyte, &BytesTransferred, &Overlapped))
+    {
+        if (ERROR_HANDLE_EOF == GetLastError())
+            return 0;
+        return -1;
+    }
+    return BytesTransferred;
+}
+
+static inline
+ssize_t pwrite(int fd, const void *buf, size_t nbyte, off_t offset)
+{
+    HANDLE h = (HANDLE)(UINT_PTR)fd;
+    OVERLAPPED Overlapped = { 0 };
+    DWORD BytesTransferred;
+    Overlapped.Offset = (DWORD)offset;
+    Overlapped.OffsetHigh = (DWORD)((size_t)offset >> 32);
+    if (!WriteFile(h, buf, (DWORD)nbyte, &BytesTransferred, &Overlapped))
+        return -1;
+    return BytesTransferred;
+}
+
+static inline
+ssize_t read(int fd, void *buf, size_t nbyte)
+{
+    return pread(fd, buf, nbyte, -1LL);
+}
+
+static inline
+ssize_t write(int fd, const void *buf, size_t nbyte)
+{
+    return pwrite(fd, buf, nbyte, -1LL);
+}
+
+/*
+ * miscellaneous
+ */
+
+#define sprintf(...)                    wsprintfA(__VA_ARGS__)
+#define vsprintf(...)                   wvsprintfA(__VA_ARGS__)
+
+static inline
+size_t strlen(const char *s)
+{
+    return lstrlenA(s);
 }
 
 /*
@@ -163,6 +225,7 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>

@@ -18,7 +18,7 @@ vm_result_t vm_run(char **text_config)
 {
     /* text parsing macros */
 #define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) ? (p += sizeof S) : 0)
-#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, (pp - text_config) + 1); goto exit; }
+#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, pp - text_config); goto exit; }
     /* page offset macro -- works for AMD64; also for ARM64 with a 4KB granule */
 #define PGO(P,L)(((P) & (0x0000ff8000000000ULL >> (((L) - 1) * 9))) >> (48 - (L) * 9) << 3)
 
