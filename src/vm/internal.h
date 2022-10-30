@@ -14,12 +14,19 @@
 #ifndef VM_INTERNAL_H_INCLUDED
 #define VM_INTERNAL_H_INCLUDED
 
-#if defined(_WIN64)
-
-#if defined(_M_X64)
+#if defined(_MSC_VER) && defined(_M_X64)
+#elif defined(__GNUC__) && defined(__x86_64__)
 #else
 #error unknown architecture
 #endif
+
+#if defined(_WIN64)
+#elif defined(__linux__)
+#else
+#error unknown platform
+#endif
+
+#if defined(_WIN64)
 
 #include <windows.h>
 #include <fcntl.h>
@@ -214,11 +221,6 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 
 #elif defined(__linux__)
 
-#if defined(__x86_64__)
-#else
-#error unknown architecture
-#endif
-
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -239,12 +241,6 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 
 #define EXEMAIN struct exemain_unused__ {}
 #define LIBMAIN struct libmain_unused__ {}
-
-#elif defined(__APPLE__)
-
-#else
-
-#error unknown platform
 
 #endif
 
