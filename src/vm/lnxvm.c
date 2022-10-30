@@ -1,5 +1,5 @@
 /**
- * @file vm/linux/vm.c
+ * @file vm/lnxvm.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */
@@ -739,9 +739,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, int vcpu_fd)
     regs.rflags = 2;
     if (-1 == ioctl(vcpu_fd, KVM_SET_REGS, &regs))
         return vm_result(VM_ERROR_VCPU, errno);
-
-    return VM_RESULT_SUCCESS;
 #endif
+    return VM_RESULT_SUCCESS;
 }
 
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run)

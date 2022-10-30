@@ -10,9 +10,6 @@
     <Filter Include="Include\vm">
       <UniqueIdentifier>{d8e7c14c-9780-4852-ba4d-301fa16c8d33}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source\linux">
-      <UniqueIdentifier>{0721a318-d51c-42a5-a789-aa6f1c51e82e}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h">
@@ -23,11 +20,11 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\program.c">
+    <ClCompile Include="..\..\src\vm\lnxvm.c">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\vm\linux\vm.c">
-      <Filter>Source\linux</Filter>
+    <ClCompile Include="..\..\src\vm\program.c">
+      <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\vm\run.c">
       <Filter>Source</Filter>

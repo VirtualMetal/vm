@@ -12,9 +12,6 @@
     <Filter Include="Include\vm">
       <UniqueIdentifier>{ea32c018-9220-4324-9d05-eacff3340407}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source\windows">
-      <UniqueIdentifier>{80bd14d9-ea15-43f0-b73d-c42e3b273c5a}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h">
@@ -25,13 +22,13 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\windows\vm.c">
-      <Filter>Source\windows</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\vm\program.c">
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\vm\run.c">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\vm\winvm.c">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>

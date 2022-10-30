@@ -17,7 +17,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\library.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
-    <ClCompile Include="..\..\src\vm\windows\vm.c" />
+    <ClCompile Include="..\..\src\vm\winvm.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\vm\library.def" />
