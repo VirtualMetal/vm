@@ -15,18 +15,26 @@
 
 vm_result_t vm_run(char **text_config)
 {
-    /* text parsing macros */
-#define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) ? (p += sizeof S) : 0)
+    /* command/command-with-index macros */
+#define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) && (p += sizeof S))
+#define CMI(S,L,U)\
+    (0 == invariant_strncmp(p, S, sizeof S - 1) && \
+    (cmi = (unsigned)strtoullint(p + sizeof S - 1, &cmip, +10), '=' == *cmip) && \
+    (L) <= cmi && cmi <= (U) && \
+    (p = cmip + 1))
+    /* check macro */
 #define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, pp - text_config); goto exit; }
-    /* page offset macro -- works for AMD64; also for ARM64 with a 4KB granule */
+    /* page offset/length macros -- work for AMD64; also for ARM64 with a 4KB granule */
 #define PGO(P,L)(((P) & (0x0000ff8000000000ULL >> (((L) - 1) * 9))) >> (48 - (L) * 9) << 3)
+#define PGL(L)  ((0x8000000000ULL >> (((L) - 1) * 9)))
 
     vm_result_t result;
     vm_config_t config;
     vm_t *instance = 0;
-    vm_count_t guest_address, length, page_address;
+    vm_count_t guest_address, length, count, page_address;
     vm_mmap_t *map;
-    int file, page_level;
+    int file;
+    char *cmip; unsigned cmi;
 
     memset(&config, 0, sizeof config);
     config.vcpu_count = 1;
@@ -39,19 +47,25 @@ vm_result_t vm_run(char **text_config)
             CHK('\0' == *p);
         }
         else
-        if (CMD("vcpu"))
+        if (CMD("vcpu_count"))
         {
             config.vcpu_count = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
         else
-        if (CMD("entry"))
+        if (CMD("vcpu_entry"))
         {
             config.vcpu_entry = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
         else
-        if (CMD("pg0"))
+        if (CMD("vcpu_table"))
+        {
+            config.vcpu_table = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
+        else
+        if (CMD("page_table") || CMD("pg0"))
         {
             config.page_table = strtoullint(p, &p, +1);
             CHK('\0' == *p);
@@ -95,16 +109,22 @@ vm_result_t vm_run(char **text_config)
 
     for (char **pp = text_config, *p = *pp++; p; p = *pp++)
     {
-        if (CMD("pg1") || CMD("pg2") || CMD("pg3") || CMD("pg4"))
+        if (CMI("pg", 1, 4))
         {
-            page_level = p[-2] - '0';
             guest_address = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
+            CHK(',' == *p || '\0' == *p);
+            if (',' == *p)
+            {
+                count = strtoullint(p + 1, &p, +1);
+                CHK('\0' == *p);
+            }
+            else
+                count = 1;
 
             page_address = config.page_table;
-            for (int level = 1; page_level >= level; level++)
+            for (unsigned level = 1; cmi >= level; level++)
             {
-                if (page_level > level)
+                if (cmi > level)
                 {
                     length = sizeof page_address;
                     vm_mread(instance,
@@ -116,12 +136,16 @@ vm_result_t vm_run(char **text_config)
                 }
                 else
                 {
-                    length = sizeof guest_address;
-                    vm_mwrite(instance,
-                        &guest_address,
-                        page_address + PGO(guest_address, level),
-                        &length);
-                    CHK(sizeof guest_address == length);
+                    for (; 0 < count; count--)
+                    {
+                        length = sizeof guest_address;
+                        vm_mwrite(instance,
+                            &guest_address,
+                            page_address + PGO(guest_address, level),
+                            &length);
+                        CHK(sizeof guest_address == length);
+                        guest_address += PGL(level);
+                    }
                 }
             }
         }
@@ -140,6 +164,8 @@ exit:
     return result;
 
 #undef CMD
+#undef CMI
 #undef CHK
 #undef PGO
+#undef PGL
 }

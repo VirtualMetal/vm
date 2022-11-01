@@ -47,9 +47,10 @@ struct vm_config
     vm_count_t debug_flags;             /* debug flags */
     vm_count_t vcpu_count;              /* number of virtual cpu's */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
+    vm_count_t vcpu_table;              /* virtual cpu data table address */
     vm_count_t page_table;              /* page table address */
 
-    vm_count_t reserved[60];
+    vm_count_t reserved[59];
 };
 
 /**
