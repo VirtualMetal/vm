@@ -12,6 +12,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h" />
+    <ClInclude Include="..\..\src\arch\arch.h" />
+    <ClInclude Include="..\..\src\arch\x64.h" />
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>

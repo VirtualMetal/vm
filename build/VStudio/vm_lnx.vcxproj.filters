@@ -10,6 +10,9 @@
     <Filter Include="Include\vm">
       <UniqueIdentifier>{d8e7c14c-9780-4852-ba4d-301fa16c8d33}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\arch">
+      <UniqueIdentifier>{0ebe8b7a-c170-4f50-bd2d-cb75e0bb281d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h">
@@ -17,6 +20,12 @@
     </ClInclude>
     <ClInclude Include="..\..\src\vm\internal.h">
       <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\arch\arch.h">
+      <Filter>Source\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\arch\x64.h">
+      <Filter>Source\arch</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

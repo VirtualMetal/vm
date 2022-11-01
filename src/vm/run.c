@@ -11,7 +11,6 @@
  * Software Foundation.
  */
 
-#include <vm/vm.h>
 #include <vm/internal.h>
 
 vm_result_t vm_run(char **text_config)

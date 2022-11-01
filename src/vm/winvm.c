@@ -11,7 +11,6 @@
  * Software Foundation.
  */
 
-#include <vm/vm.h>
 #include <vm/internal.h>
 #include <winhvplatform.h>
 

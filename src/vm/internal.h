@@ -26,6 +26,9 @@
 #error unknown platform
 #endif
 
+#include <vm/vm.h>
+#include <arch/arch.h>
+
 #if defined(_WIN64)
 
 #include <windows.h>
@@ -177,6 +180,7 @@ ssize_t write(int fd, const void *buf, size_t nbyte)
 #define sprintf(...)                    wsprintfA(__VA_ARGS__)
 #define vsprintf(...)                   wvsprintfA(__VA_ARGS__)
 
+#pragma function(strlen)
 static inline
 size_t strlen(const char *s)
 {
