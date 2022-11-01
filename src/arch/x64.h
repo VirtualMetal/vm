@@ -23,7 +23,6 @@
  */
 
 /* segment descriptor - [INT 3.4.5], [AMD 4.8.1,4.8.2] */
-ARCH_PACKED(
 struct arch_x64_seg_desc
 {
     union
@@ -45,10 +44,10 @@ struct arch_x64_seg_desc
         };
         arch_u64_t value0;
     };
-});
+};
+ARCH_STATIC_ASSERT(8 == sizeof(struct arch_x64_seg_desc));
 
 /* system segment descriptor - [INT 7.2.3], [AMD 4.8.3] */
-ARCH_PACKED(
 struct arch_x64_sseg_desc
 {
     union
@@ -79,10 +78,10 @@ struct arch_x64_sseg_desc
         };
         arch_u64_t value1;
     };
-});
+};
+ARCH_STATIC_ASSERT(16 == sizeof(struct arch_x64_sseg_desc));
 
 /* gate descriptor - [INT 7.2.3], [AMD 4.8.4] */
-ARCH_PACKED(
 struct arch_x64_gate_desc
 {
     union
@@ -110,30 +109,73 @@ struct arch_x64_gate_desc
         };
         arch_u64_t value1;
     };
-});
+};
+ARCH_STATIC_ASSERT(16 == sizeof(struct arch_x64_gate_desc));
 
-ARCH_PACKED(
+/* global descriptor table */
 struct arch_x64_gdt
 {
-    struct arch_x64_seg_desc null;
+    struct arch_x64_seg_desc null;      /* cacheline */
     struct arch_x64_seg_desc reserved0;
     struct arch_x64_sseg_desc tss;
     struct arch_x64_seg_desc km_cs;
     struct arch_x64_seg_desc km_ds;
     struct arch_x64_seg_desc um_cs;
     struct arch_x64_seg_desc um_ds;
-});
+};
+ARCH_STATIC_ASSERT(64 == sizeof(struct arch_x64_gdt));
 
-ARCH_PACKED(
+/* task state segment - [INT 7.7], [AMD 12.2.5] */
 struct arch_x64_tss
 {
-    arch_u32_t reserved0[1];
-    arch_u64_t rsp[3];
+    arch_u32_t reserved0[1];            /* cacheline */
+    arch_u32_t rsp[3][2];
     arch_u32_t reserved1[2];
-    arch_u64_t ist[7];
-    arch_u32_t reserved2[3];
-    arch_u32_t iopb;
-});
+    arch_u32_t ist[7][2];
+    arch_u32_t reserved2[2];
+    arch_u16_t reserved3[1];
+    arch_u16_t iopb;
+};
+ARCH_STATIC_ASSERT(104 == sizeof(struct arch_x64_tss));
+
+/* interrupt descriptor table - [INT 6.3], [AMD 8.2] */
+struct arch_x64_idt
+{
+    struct arch_x64_gate_desc de;       /* divide error */
+    struct arch_x64_gate_desc db;       /* debug exception */
+    struct arch_x64_gate_desc nmi;      /* non-maskable interrupt */
+    struct arch_x64_gate_desc bp;       /* breakpoint */
+    struct arch_x64_gate_desc of;       /* overflow */
+    struct arch_x64_gate_desc br;       /* bound range exceeded */
+    struct arch_x64_gate_desc ud;       /* invalid opcode */
+    struct arch_x64_gate_desc nm;       /* device not available */
+    struct arch_x64_gate_desc df;       /* double fault */
+    struct arch_x64_gate_desc reserved0;
+    struct arch_x64_gate_desc ts;       /* invalid tss */
+    struct arch_x64_gate_desc np;       /* segment not present */
+    struct arch_x64_gate_desc ss;       /* stack segment fault */
+    struct arch_x64_gate_desc gp;       /* general protection fault */
+    struct arch_x64_gate_desc pf;       /* page fault */
+    struct arch_x64_gate_desc reserved1;
+    struct arch_x64_gate_desc mf;       /* x87 FPU floating-point error */
+    struct arch_x64_gate_desc ac;       /* alignment check */
+    struct arch_x64_gate_desc mc;       /* machine check */
+    struct arch_x64_gate_desc xm;       /* simd floating point exception */
+    struct arch_x64_gate_desc ve;       /* virtualization exception */
+    struct arch_x64_gate_desc cp;       /* control protection exception */
+    struct arch_x64_gate_desc reserved2[10];
+};
+ARCH_STATIC_ASSERT(32 * 16 == sizeof(struct arch_x64_idt));
+
+/* CPU data */
+struct arch_x64_cpu_data
+{
+    ARCH_ALIGN(64) struct arch_x64_gdt gdt;
+    ARCH_ALIGN(64) struct arch_x64_tss tss;
+    ARCH_ALIGN(64) struct arch_x64_idt idt;
+    ARCH_ALIGN(4096) arch_u64_t km_stack[488];
+};
+ARCH_STATIC_ASSERT(8192 == sizeof(struct arch_x64_cpu_data));
 
 static inline
 void arch_x64_gdt_init(struct arch_x64_gdt *gdt)
@@ -195,6 +237,22 @@ void arch_x64_tss_init(struct arch_x64_tss *tss)
     *tss = (struct arch_x64_tss){ 0 };
 
     tss->iopb = sizeof(struct arch_x64_tss);
+}
+
+static inline
+void arch_x64_cpu_data_init(struct arch_x64_cpu_data *cpu_data)
+{
+    *cpu_data = (struct arch_x64_cpu_data){ 0 };
+
+    arch_x64_gdt_init(&cpu_data->gdt);
+    arch_x64_tss_init(&cpu_data->tss);
+
+    cpu_data->gdt.tss.address0 = ((arch_u64_t)&cpu_data->tss) & ((1 << 24) - 1);
+    cpu_data->gdt.tss.address1 = ((arch_u64_t)&cpu_data->tss >> 24) & ((1 << 8) - 1);
+    cpu_data->gdt.tss.address2 = (arch_u32_t)((arch_u64_t)&cpu_data->tss >> 32);
+
+    cpu_data->tss.rsp[0][0] = (arch_u32_t)((arch_u64_t)cpu_data->km_stack);
+    cpu_data->tss.rsp[0][1] = (arch_u32_t)((arch_u64_t)cpu_data->km_stack >> 32);
 }
 
 #endif
