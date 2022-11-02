@@ -49,7 +49,8 @@ static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT 
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_exit_cancelled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static void vm_debug_log(vm_t *instance,
+static void vm_debug_log_mmap(vm_t *instance);
+static void vm_debug_log_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
@@ -447,6 +448,9 @@ vm_result_t vm_start(vm_t *instance)
         goto exit;
     }
 
+    if (instance->config.debug_log)
+        vm_debug_log_mmap(instance);
+
     InterlockedExchange64(&instance->thread_result, VM_RESULT_SUCCESS);
 
     AcquireSRWLockExclusive(&instance->cancel_lock);
@@ -717,7 +721,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
         result = dispatch[index](instance, &exit_context);
         if (instance->config.debug_log)
-            vm_debug_log(instance, vcpu_index, &exit_context, result);
+            vm_debug_log_exit(instance, vcpu_index, &exit_context, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -913,7 +917,22 @@ static vm_result_t vm_vcpu_exit_cancelled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEX
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static void vm_debug_log(vm_t *instance,
+static void vm_debug_log_mmap(vm_t *instance)
+{
+    AcquireSRWLockExclusive(&instance->mmap_lock);
+
+    list_traverse(link, next, &instance->mmap_list)
+    {
+        vm_mmap_t *map = (vm_mmap_t *)link;
+        instance->config.debug_log("mmap=%p,%p",
+            map->guest_address,
+            map->head_length + map->tail_length);
+    }
+
+    ReleaseSRWLockExclusive(&instance->mmap_lock);
+}
+
+static void vm_debug_log_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
 {
     char *exit_reason_str;
@@ -981,12 +1000,11 @@ static void vm_debug_log(vm_t *instance,
 
 #if defined(_M_X64)
     instance->config.debug_log(
-        "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d",
+        "[%u] %s(cs:rip=%04x:%p, efl=%08x) = %d",
         (unsigned)vcpu_index,
         exit_reason_str,
         exit_context->VpContext.Cs.Selector, exit_context->VpContext.Rip,
         (UINT32)exit_context->VpContext.Rflags,
-        exit_context->VpContext.ExecutionState.Cr0Pe,
         (int)(vm_result_error(result) >> 48));
 #endif
 }

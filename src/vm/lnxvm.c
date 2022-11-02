@@ -62,7 +62,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
-static void vm_debug_log(vm_t *instance,
+static void vm_debug_log_mmap(vm_t *instance);
+static void vm_debug_log_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
@@ -465,6 +466,9 @@ vm_result_t vm_start(vm_t *instance)
         goto exit;
     }
 
+    if (instance->config.debug_log)
+        vm_debug_log_mmap(instance);
+
     atomic_store(&instance->thread_result, VM_RESULT_SUCCESS);
 
     pthread_mutex_lock(&instance->cancel_lock);
@@ -671,7 +675,7 @@ static void *vm_thread(void *instance0)
 
         result = dispatch[index](instance, vcpu_run);
         if (instance->config.debug_log)
-            vm_debug_log(instance, vcpu_index, vcpu_run, result);
+            vm_debug_log_exit(instance, vcpu_index, vcpu_run, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -865,7 +869,22 @@ static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run)
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static void vm_debug_log(vm_t *instance,
+static void vm_debug_log_mmap(vm_t *instance)
+{
+    pthread_mutex_lock(&instance->mmap_lock);
+
+    list_traverse(link, next, &instance->mmap_list)
+    {
+        vm_mmap_t *map = (vm_mmap_t *)link;
+        instance->config.debug_log("mmap=%p,%p",
+            map->guest_address,
+            map->region_length);
+    }
+
+    pthread_mutex_unlock(&instance->mmap_lock);
+}
+
+static void vm_debug_log_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result)
 {
     switch (vcpu_run->exit_reason)
