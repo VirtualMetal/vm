@@ -854,7 +854,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->tss,
         .Segment.Base = (UINT64)(sseg_desc.address0 | (sseg_desc.address1 << 24) | (sseg_desc.address2 << 32)),
         .Segment.Limit = (UINT32)(sseg_desc.limit0 | (sseg_desc.limit1 << 16)),
-        .Segment.SegmentType = sseg_desc.type,
+        .Segment.SegmentType = 11,      /* TYPE=11 (64-bit busy TSS) */
         .Segment.NonSystemSegment = sseg_desc.s,
         .Segment.DescriptorPrivilegeLevel = sseg_desc.dpl,
         .Segment.Present = sseg_desc.p,

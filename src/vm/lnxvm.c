@@ -812,7 +812,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
         .base = (__u64)((__u64)sseg_desc.address0 | ((__u64)sseg_desc.address1 << 24) |
             ((__u64)sseg_desc.address2 << 32)),
         .limit = (__u32)(sseg_desc.limit0 | (sseg_desc.limit1 << 16)),
-        .type = sseg_desc.type,
+        .type = 11,                     /* TYPE=11 (64-bit busy TSS) */
         .s = sseg_desc.s,
         .dpl = sseg_desc.dpl,
         .present = sseg_desc.p,
@@ -878,6 +878,11 @@ static void vm_debug_log(vm_t *instance,
         break;
     case KVM_EXIT_HLT:
         instance->config.debug_log("[%u] HLT() = %d",
+            vcpu_index,
+            (int)(vm_result_error(result) >> 48));
+        break;
+    case KVM_EXIT_SHUTDOWN:
+        instance->config.debug_log("[%u] SHUTDOWN() = %d",
             vcpu_index,
             (int)(vm_result_error(result) >> 48));
         break;
