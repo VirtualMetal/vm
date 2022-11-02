@@ -58,7 +58,7 @@ struct vm_mmap
 
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
-static vm_result_t vm_vcpu_init(vm_t *instance, int vcpu_fd);
+static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
@@ -580,7 +580,7 @@ static void *vm_thread(void *instance0)
     }
     atomic_store_explicit(&vm_thread_vcpu_run, vcpu_run, memory_order_relaxed);
 
-    result = vm_vcpu_init(instance, vcpu_fd);
+    result = vm_vcpu_init(instance, vcpu_index, vcpu_fd);
     if (!vm_result_check(result))
         goto exit;
 
@@ -721,26 +721,133 @@ static void vm_thread_signal(int signum)
         atomic_store_explicit(&vcpu_run->immediate_exit, 1, memory_order_relaxed);
 }
 
-static vm_result_t vm_vcpu_init(vm_t *instance, int vcpu_fd)
+static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd)
 {
 #if defined(__x86_64__)
+
+    vm_result_t result;
+    void *page = 0;
+    vm_count_t length;
+    vm_count_t cpu_data_address;
+    struct arch_x64_seg_desc seg_desc;
+    struct arch_x64_sseg_desc sseg_desc;
     struct kvm_regs regs;
     struct kvm_sregs sregs;
 
-    if (-1 == ioctl(vcpu_fd, (int)KVM_GET_SREGS, &sregs))
-        return vm_result(VM_ERROR_VCPU, errno);
+    page = malloc(sizeof(struct arch_x64_cpu_data));
+    if (0 == page)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
 
-    sregs.cs.base = 0, sregs.cs.limit = 0xffff, sregs.cs.selector = 0;
-
-    if (-1 == ioctl(vcpu_fd, KVM_SET_SREGS, &sregs))
-        return vm_result(VM_ERROR_VCPU, errno);
+    cpu_data_address = instance->config.vcpu_table + vcpu_index * sizeof(struct arch_x64_cpu_data);
+    arch_x64_cpu_data_init(page, cpu_data_address);
+    length = sizeof(struct arch_x64_cpu_data);
+    vm_mwrite(instance, page, cpu_data_address, &length);
+    if (sizeof(struct arch_x64_cpu_data) != length)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
 
     memset(&regs, 0, sizeof regs);
+    regs.rip = instance->config.vcpu_entry;
     regs.rflags = 2;
+
+    memset(&sregs, 0, sizeof sregs);
+    seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_cs;
+    sregs.cs = (struct kvm_segment){
+        .selector = (__u16)(uintptr_t)&((struct arch_x64_gdt *)0)->km_cs,
+        .base = (__u64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .limit = (__u32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .type = seg_desc.type,
+        .s = seg_desc.s,
+        .dpl = seg_desc.dpl,
+        .present = seg_desc.p,
+        .avl = seg_desc.avl,
+        .l = seg_desc.l,
+        .db = seg_desc.db,
+        .g = seg_desc.g };
+    seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_ds;
+    sregs.ds = (struct kvm_segment){
+        .selector = (__u16)(uintptr_t)&((struct arch_x64_gdt *)0)->km_ds,
+        .base = (__u64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .limit = (__u32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .type = seg_desc.type,
+        .s = seg_desc.s,
+        .dpl = seg_desc.dpl,
+        .present = seg_desc.p,
+        .avl = seg_desc.avl,
+        .l = seg_desc.l,
+        .db = seg_desc.db,
+        .g = seg_desc.g };
+    sregs.es = (struct kvm_segment){
+        .selector = (__u16)(uintptr_t)&((struct arch_x64_gdt *)0)->km_ds,
+        .base = (__u64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .limit = (__u32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .type = seg_desc.type,
+        .s = seg_desc.s,
+        .dpl = seg_desc.dpl,
+        .present = seg_desc.p,
+        .avl = seg_desc.avl,
+        .l = seg_desc.l,
+        .db = seg_desc.db,
+        .g = seg_desc.g };
+    sregs.ss = (struct kvm_segment){
+        .selector = (__u16)(uintptr_t)&((struct arch_x64_gdt *)0)->km_ds,
+        .base = (__u64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .limit = (__u32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .type = seg_desc.type,
+        .s = seg_desc.s,
+        .dpl = seg_desc.dpl,
+        .present = seg_desc.p,
+        .avl = seg_desc.avl,
+        .l = seg_desc.l,
+        .db = seg_desc.db,
+        .g = seg_desc.g };
+    sseg_desc = ((struct arch_x64_cpu_data *)page)->gdt.tss;
+    sregs.tr = (struct kvm_segment){
+        .selector = (__u16)(uintptr_t)&((struct arch_x64_gdt *)0)->tss,
+        .base = (__u64)((__u64)sseg_desc.address0 | ((__u64)sseg_desc.address1 << 24) |
+            ((__u64)sseg_desc.address2 << 32)),
+        .limit = (__u32)(sseg_desc.limit0 | (sseg_desc.limit1 << 16)),
+        .type = sseg_desc.type,
+        .s = sseg_desc.s,
+        .dpl = sseg_desc.dpl,
+        .present = sseg_desc.p,
+        .avl = sseg_desc.avl,
+        .l = sseg_desc.l,
+        .db = sseg_desc.db,
+        .g = sseg_desc.g };
+    sregs.gdt = (struct kvm_dtable){
+        .base = cpu_data_address + (vm_count_t)&((struct arch_x64_cpu_data *)0)->gdt,
+        .limit = sizeof(struct arch_x64_gdt) };
+    sregs.cr0 = 0x80000011;             /* PG=1,MP=1,PE=1 */
+    sregs.cr3 = instance->config.page_table;
+    sregs.cr4 = 0x00000020;             /* PAE=1 */
+    sregs.efer = 0x00000500;            /* LMA=1,LME=1 */
+
+    if (-1 == ioctl(vcpu_fd, KVM_SET_SREGS, &sregs))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
     if (-1 == ioctl(vcpu_fd, KVM_SET_REGS, &regs))
-        return vm_result(VM_ERROR_VCPU, errno);
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    free(page);
+
+    return result;
+
 #endif
-    return VM_RESULT_SUCCESS;
 }
 
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run)
@@ -775,7 +882,7 @@ static void vm_debug_log(vm_t *instance,
             (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_FAIL_ENTRY:
-        instance->config.debug_log("[%u] FAIL_ENTRY(fail_entry=%llu) = %d",
+        instance->config.debug_log("[%u] FAIL_ENTRY(hardware_entry_failure_reason=0x%lx) = %d",
             vcpu_index,
             (unsigned long long)vcpu_run->fail_entry.hardware_entry_failure_reason,
             (int)(vm_result_error(result) >> 48));

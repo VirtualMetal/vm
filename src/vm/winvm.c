@@ -870,13 +870,13 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
     REG(Cr0) = VAL(.Reg64 = 0x80000011);    /* PG=1,MP=1,PE=1 */
     REG(Cr3) = VAL(.Reg64 = instance->config.page_table);
     REG(Cr4) = VAL(.Reg64 = 0x00000020);    /* PAE=1 */
-    REG(Efer) = VAL(.Reg64 = 0x00000100);   /* LME=1 */
+    REG(Efer) = VAL(.Reg64 = 0x00000500);   /* LMA=1,LME=1 */
 
     hresult = WHvSetVirtualProcessorRegisters(instance->partition,
         vcpu_index, reg, regc, val);
     if (FAILED(hresult))
     {
-        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+        result = vm_result(VM_ERROR_VCPU, hresult);
         goto exit;
     }
 
