@@ -745,8 +745,151 @@ exit:
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
 {
 #if defined(_M_X64)
+#define CLR()                           regc = 0
+#define REG(r)                          reg[regc] = WHvX64Register ## r, val[regc++]
+#define VAL(...)                        (WHV_REGISTER_VALUE){ __VA_ARGS__ }
+
+    vm_result_t result;
+    void *page = 0;
+    vm_count_t length;
+    vm_count_t cpu_data_address;
+    struct arch_x64_seg_desc seg_desc;
+    struct arch_x64_sseg_desc sseg_desc;
+    WHV_REGISTER_NAME reg[128];
+    WHV_REGISTER_VALUE val[128];
+    UINT32 regc;
+    HRESULT hresult;
+
+    page = malloc(sizeof(struct arch_x64_cpu_data));
+    if (0 == page)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    cpu_data_address = instance->config.vcpu_table + vcpu_index * sizeof(struct arch_x64_cpu_data);
+    arch_x64_cpu_data_init(page, cpu_data_address);
+    length = sizeof(struct arch_x64_cpu_data);
+    vm_mwrite(instance, page, cpu_data_address, &length);
+    if (sizeof(struct arch_x64_cpu_data) != length)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    CLR();
+    REG(Rax) = VAL(0);
+    REG(Rcx) = VAL(0);
+    REG(Rdx) = VAL(0);
+    REG(Rbx) = VAL(0);
+    REG(Rsp) = VAL(0);
+    REG(Rbp) = VAL(0);
+    REG(Rsi) = VAL(0);
+    REG(Rdi) = VAL(0);
+    REG(R8) = VAL(0);
+    REG(R9) = VAL(0);
+    REG(R10) = VAL(0);
+    REG(R11) = VAL(0);
+    REG(R12) = VAL(0);
+    REG(R13) = VAL(0);
+    REG(R14) = VAL(0);
+    REG(R15) = VAL(0);
+    REG(Rip) = VAL(.Reg64 = instance->config.vcpu_entry);
+    REG(Rflags) = VAL(.Reg64 = 2);
+
+    seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_cs;
+    REG(Cs) = VAL(
+        .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_cs,
+        .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .Segment.SegmentType = seg_desc.type,
+        .Segment.NonSystemSegment = seg_desc.s,
+        .Segment.DescriptorPrivilegeLevel = seg_desc.dpl,
+        .Segment.Present = seg_desc.p,
+        .Segment.Available = seg_desc.avl,
+        .Segment.Long = seg_desc.l,
+        .Segment.Default = seg_desc.db,
+        .Segment.Granularity = seg_desc.g);
+    seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_ds;
+    REG(Ds) = VAL(
+        .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_ds,
+        .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .Segment.SegmentType = seg_desc.type,
+        .Segment.NonSystemSegment = seg_desc.s,
+        .Segment.DescriptorPrivilegeLevel = seg_desc.dpl,
+        .Segment.Present = seg_desc.p,
+        .Segment.Available = seg_desc.avl,
+        .Segment.Long = seg_desc.l,
+        .Segment.Default = seg_desc.db,
+        .Segment.Granularity = seg_desc.g);
+    REG(Es) = VAL(
+        .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_ds,
+        .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .Segment.SegmentType = seg_desc.type,
+        .Segment.NonSystemSegment = seg_desc.s,
+        .Segment.DescriptorPrivilegeLevel = seg_desc.dpl,
+        .Segment.Present = seg_desc.p,
+        .Segment.Available = seg_desc.avl,
+        .Segment.Long = seg_desc.l,
+        .Segment.Default = seg_desc.db,
+        .Segment.Granularity = seg_desc.g);
+    REG(Ss) = VAL(
+        .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_ds,
+        .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
+        .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
+        .Segment.SegmentType = seg_desc.type,
+        .Segment.NonSystemSegment = seg_desc.s,
+        .Segment.DescriptorPrivilegeLevel = seg_desc.dpl,
+        .Segment.Present = seg_desc.p,
+        .Segment.Available = seg_desc.avl,
+        .Segment.Long = seg_desc.l,
+        .Segment.Default = seg_desc.db,
+        .Segment.Granularity = seg_desc.g);
+
+    sseg_desc = ((struct arch_x64_cpu_data *)page)->gdt.tss;
+    REG(Tr) = VAL(
+        .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->tss,
+        .Segment.Base = (UINT64)(sseg_desc.address0 | (sseg_desc.address1 << 24) | (sseg_desc.address2 << 32)),
+        .Segment.Limit = (UINT32)(sseg_desc.limit0 | (sseg_desc.limit1 << 16)),
+        .Segment.SegmentType = sseg_desc.type,
+        .Segment.NonSystemSegment = sseg_desc.s,
+        .Segment.DescriptorPrivilegeLevel = sseg_desc.dpl,
+        .Segment.Present = sseg_desc.p,
+        .Segment.Available = sseg_desc.avl,
+        .Segment.Long = sseg_desc.l,
+        .Segment.Default = sseg_desc.db,
+        .Segment.Granularity = sseg_desc.g);
+
+    REG(Gdtr) = VAL(
+        .Table.Base = cpu_data_address + (vm_count_t)&((struct arch_x64_cpu_data *)0)->gdt,
+        .Table.Limit = sizeof(struct arch_x64_gdt));
+
+    REG(Cr0) = VAL(.Reg64 = 0x80000011);    /* PG=1,MP=1,PE=1 */
+    REG(Cr3) = VAL(.Reg64 = instance->config.page_table);
+    REG(Cr4) = VAL(.Reg64 = 0x00000020);    /* PAE=1 */
+    REG(Efer) = VAL(.Reg64 = 0x00000100);   /* LME=1 */
+
+    hresult = WHvSetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, reg, regc, val);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    free(page);
+
+    return result;
+
+#undef CLR
+#undef REG
+#undef VAL
 #endif
-    return VM_RESULT_SUCCESS;
 }
 
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context)

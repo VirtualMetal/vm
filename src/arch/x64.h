@@ -168,6 +168,7 @@ void arch_x64_gdt_init(struct arch_x64_gdt *gdt)
         .dpl = 0,                       /* DPL=0 (kernel-mode) */
         .p = 1,                         /* P=1 (present) */
         .l = 1,                         /* L=1 (long mode) */
+        .g = 1,                         /* G=1 (ignored in long mode) */
     };
 
     gdt->km_ds = (struct arch_x64_seg_desc){
@@ -178,6 +179,7 @@ void arch_x64_gdt_init(struct arch_x64_gdt *gdt)
         .dpl = 0,                       /* DPL=0 (kernel-mode) */
         .p = 1,                         /* P=1 (present) */
         .l = 1,                         /* L=1 (long mode) */
+        .g = 1,                         /* G=1 (ignored in long mode) */
     };
 
     gdt->um_cs = (struct arch_x64_seg_desc){
@@ -188,6 +190,7 @@ void arch_x64_gdt_init(struct arch_x64_gdt *gdt)
         .dpl = 3,                       /* DPL=3 (user-mode) */
         .p = 1,                         /* P=1 (present) */
         .l = 1,                         /* L=1 (long mode) */
+        .g = 1,                         /* G=1 (ignored in long mode) */
     };
 
     gdt->um_ds = (struct arch_x64_seg_desc){
@@ -198,6 +201,7 @@ void arch_x64_gdt_init(struct arch_x64_gdt *gdt)
         .dpl = 3,                       /* DPL=3 (user-mode) */
         .p = 1,                         /* P=1 (present) */
         .l = 1,                         /* L=1 (long mode) */
+        .g = 1,                         /* G=1 (ignored in long mode) */
     };
 
     gdt->tss = (struct arch_x64_sseg_desc){
