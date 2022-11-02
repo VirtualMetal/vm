@@ -13,34 +13,60 @@
 
 #include <vm/internal.h>
 
-#define PROGNAME                        "vm"
-#define info(format, ...)               (printfd(STDOUT_FILENO, PROGNAME ": " format "\n", __VA_ARGS__))
-#define warn(format, ...)               (printfd(STDERR_FILENO, PROGNAME ": " format "\n", __VA_ARGS__))
-
-void vprintfd(int fd, const char *format, va_list ap)
+void vprintlog(int fd, const char *format, va_list ap)
 {
-    char buf[1024];
+    char buf[4 + 1024 + 1];
+    size_t len;
 
-    vsprintf(buf, format, ap);
-    buf[sizeof buf - 1] = '\0';
-    write(fd, buf, strlen(buf));
+    buf[0] = 'v';
+    buf[1] = 'm';
+    buf[2] = ':';
+    buf[3] = ' ';
+    vsprintf(buf + 4, format, ap);
+    len = strlen(buf);
+    buf[len++] = '\n';
+    buf[len] = '\0';
+    write(fd, buf, len);
 }
 
-void printfd(int fd, const char *format, ...)
+void printlog(int fd, const char *format, ...)
 {
     va_list ap;
 
     va_start(ap, format);
-    vprintfd(fd, format, ap);
+    vprintlog(fd, format, ap);
+    va_end(ap);
+}
+
+void info(const char *format, ...)
+{
+    va_list ap;
+
+    va_start(ap, format);
+    vprintlog(STDOUT_FILENO, format, ap);
+    va_end(ap);
+}
+
+void warn(const char *format, ...)
+{
+    va_list ap;
+
+    va_start(ap, format);
+    vprintlog(STDERR_FILENO, format, ap);
     va_end(ap);
 }
 
 int main(int argc, char **argv)
 {
     vm_result_t result;
+    vm_config_t default_config;
     int reason;
 
-    result = vm_run(argv + 1);
+    memset(&default_config, 0, sizeof default_config);
+    default_config.debug_log = warn;
+    default_config.vcpu_count = 1;
+
+    result = vm_run(&default_config, argv + 1);
     if (vm_result_check(result))
         return 0;
     else if (VM_ERROR_MISUSE != vm_result_error(result))

@@ -13,7 +13,7 @@
 
 #include <vm/internal.h>
 
-vm_result_t vm_run(char **text_config)
+vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
 {
     /* command/command-with-index macros */
 #define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) && (p += sizeof S))
@@ -36,14 +36,14 @@ vm_result_t vm_run(char **text_config)
     int file;
     char *cmip; unsigned cmi;
 
-    memset(&config, 0, sizeof config);
-    config.vcpu_count = 1;
+    config = *default_config;
+    config.debug_log = 0;
 
     for (char **pp = text_config, *p = *pp++; p; p = *pp++)
     {
-        if (CMD("debug"))
+        if (CMD("debug_log"))
         {
-            config.debug_flags = strtoullint(p, &p, -1);
+            config.debug_log = strtoullint(p, &p, +1) ? default_config->debug_log : 0;
             CHK('\0' == *p);
         }
         else

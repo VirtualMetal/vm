@@ -44,7 +44,7 @@ typedef unsigned long long vm_count_t;
 
 struct vm_config
 {
-    vm_count_t debug_flags;             /* debug flags */
+    void (*debug_log)(const char *format, ...);
     vm_count_t vcpu_count;              /* number of virtual cpu's */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
     vm_count_t vcpu_table;              /* virtual cpu data table address */
@@ -60,12 +60,14 @@ struct vm_config
  * waits until the instance has stopped and then deletes the instance and
  * returns.
  *
+ * @param default_config
+ *     The default base configuration to use.
  * @param text_config
- *     The VM configuration to use.
+ *     The textual configuration to use.
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
-vm_result_t vm_run(char **text_config);
+vm_result_t vm_run(const vm_config_t *default_config, char **text_config);
 
 /**
  * Create a new VM instance with the specified configuration.

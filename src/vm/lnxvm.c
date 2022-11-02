@@ -62,7 +62,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, int vcpu_fd);
 static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
-static void vm_debug_log(unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
+static void vm_debug_log(vm_t *instance,
+    unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -669,8 +670,8 @@ static void *vm_thread(void *instance0)
 #undef SQUASH
 
         result = dispatch[index](instance, vcpu_run);
-        if (instance->config.debug_flags)
-            vm_debug_log(vcpu_index, vcpu_run, result);
+        if (instance->config.debug_log)
+            vm_debug_log(instance, vcpu_index, vcpu_run, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -757,44 +758,39 @@ static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run)
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static void vm_debug_log(unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result)
+static void vm_debug_log(vm_t *instance,
+    unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result)
 {
-    char buffer[1024];
-    ssize_t bytes;
-
     switch (vcpu_run->exit_reason)
     {
     case KVM_EXIT_UNKNOWN:
-        snprintf(buffer, sizeof buffer, "[%u] UNKNOWN(hardware_exit_reason=%llu) = %d\n",
+        instance->config.debug_log("[%u] UNKNOWN(hardware_exit_reason=%llu) = %d",
             vcpu_index,
             (unsigned long long)vcpu_run->hw.hardware_exit_reason,
             (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_HLT:
-        snprintf(buffer, sizeof buffer, "[%u] HLT() = %d\n",
+        instance->config.debug_log("[%u] HLT() = %d",
             vcpu_index,
             (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_FAIL_ENTRY:
-        snprintf(buffer, sizeof buffer, "[%u] FAIL_ENTRY(fail_entry=%llu) = %d\n",
+        instance->config.debug_log("[%u] FAIL_ENTRY(fail_entry=%llu) = %d",
             vcpu_index,
             (unsigned long long)vcpu_run->fail_entry.hardware_entry_failure_reason,
             (int)(vm_result_error(result) >> 48));
         break;
     case KVM_EXIT_INTERNAL_ERROR:
-        snprintf(buffer, sizeof buffer, "[%u] INTERNAL_ERROR(suberror=%u) = %d\n",
+        instance->config.debug_log("[%u] INTERNAL_ERROR(suberror=%u) = %d",
             vcpu_index,
             (unsigned)vcpu_run->internal.suberror,
             (int)(vm_result_error(result) >> 48));
         break;
     default:
-        snprintf(buffer, sizeof buffer, "[%u] EXIT=%x() = %d\n",
+        instance->config.debug_log("[%u] EXIT=%x() = %d",
             vcpu_index,
             vcpu_run->exit_reason,
             (int)(vm_result_error(result) >> 48));
         break;
     }
-
-    bytes = write(STDERR_FILENO, buffer, strlen(buffer));
-    (void)bytes;
 }

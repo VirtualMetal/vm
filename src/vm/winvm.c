@@ -49,7 +49,8 @@ static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT 
 static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_exit_io(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_exit_cancelled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEXT *exit_context);
-static void vm_debug_log(UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
+static void vm_debug_log(vm_t *instance,
+    UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -715,8 +716,8 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 #undef SQUASH
 
         result = dispatch[index](instance, &exit_context);
-        if (instance->config.debug_flags)
-            vm_debug_log(vcpu_index, &exit_context, result);
+        if (instance->config.debug_log)
+            vm_debug_log(instance, vcpu_index, &exit_context, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -912,11 +913,10 @@ static vm_result_t vm_vcpu_exit_cancelled(vm_t *instance, WHV_RUN_VP_EXIT_CONTEX
     return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
-static void vm_debug_log(UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
+static void vm_debug_log(vm_t *instance,
+    UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
 {
-    char buffer[1024];
     char *exit_reason_str;
-    DWORD bytes;
 
     switch (exit_context->ExitReason)
     {
@@ -980,7 +980,8 @@ static void vm_debug_log(UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_contex
     }
 
 #if defined(_M_X64)
-    wsprintfA(buffer, "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d\n",
+    instance->config.debug_log(
+        "[%u] %s(cs:rip=%04x:%p, efl=%08x, pe=%d) = %d",
         (unsigned)vcpu_index,
         exit_reason_str,
         exit_context->VpContext.Cs.Selector, exit_context->VpContext.Rip,
@@ -988,6 +989,4 @@ static void vm_debug_log(UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_contex
         exit_context->VpContext.ExecutionState.Cr0Pe,
         (int)(vm_result_error(result) >> 48));
 #endif
-    buffer[sizeof buffer - 1] = '\0';
-    WriteFile(GetStdHandle(STD_ERROR_HANDLE), buffer, lstrlenA(buffer), &bytes, 0);
 }
