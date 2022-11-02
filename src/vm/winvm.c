@@ -852,7 +852,6 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Long = seg_desc.l,
         .Segment.Default = seg_desc.db,
         .Segment.Granularity = seg_desc.g);
-
     sseg_desc = ((struct arch_x64_cpu_data *)page)->gdt.tss;
     REG(Tr) = VAL(
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->tss,
@@ -866,11 +865,9 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Long = sseg_desc.l,
         .Segment.Default = sseg_desc.db,
         .Segment.Granularity = sseg_desc.g);
-
     REG(Gdtr) = VAL(
         .Table.Base = cpu_data_address + (vm_count_t)&((struct arch_x64_cpu_data *)0)->gdt,
         .Table.Limit = sizeof(struct arch_x64_gdt));
-
     REG(Cr0) = VAL(.Reg64 = 0x80000011);    /* PG=1,MP=1,PE=1 */
     REG(Cr3) = VAL(.Reg64 = instance->config.page_table);
     REG(Cr4) = VAL(.Reg64 = 0x00000020);    /* PAE=1 */
