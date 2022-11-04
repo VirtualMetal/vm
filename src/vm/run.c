@@ -167,7 +167,8 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
         }
     }
 
-    if ((invalid_index = bmap_find(valid, bmap_capacity(valid), 0)) < config_count)
+    invalid_index = bmap_find(valid, bmap_capacity(valid), 0);
+    if (invalid_index < config_count)
     {
         result = vm_result(VM_ERROR_MISUSE, invalid_index + 1);
         goto exit;
