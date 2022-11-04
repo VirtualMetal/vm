@@ -14,11 +14,6 @@
 #include <vm/internal.h>
 #include <linux/kvm.h>
 
-#define SLOT_COUNT                      1024                    /* <= page size */
-#define SLOT_MASK                       (SLOT_COUNT - 1)
-#define SLOT_BITMAP_ELEM_BITS           64
-#define SLOT_BITMAP_ELEM_COUNT          (SLOT_COUNT / SLOT_BITMAP_ELEM_BITS)
-
 #define SIG_VCPU_CANCEL                 SIGUSR1
 
 struct vm
@@ -29,7 +24,7 @@ struct vm
     int vcpu_run_size;
     pthread_mutex_t mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
-    int64_t slot_bitmap[SLOT_BITMAP_ELEM_COUNT];    /* ditto */
+    bmap_t slot_bmap[bmap_declcount(1024)];     /* ditto */
     pthread_mutex_t cancel_lock;
     pthread_barrier_t barrier;
     pthread_t thread;                   /* protected by cancel_lock */
@@ -46,7 +41,7 @@ struct vm
 struct vm_mmap
 {
     list_link_t mmap_link;              /* protected by mmap_lock */
-    int slot;
+    unsigned slot;
     uint8_t *region;
     uint64_t region_length;
     uint64_t guest_address;
@@ -86,8 +81,6 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->hv_fd = -1;
     instance->vm_fd = -1;
     list_init(&instance->mmap_list);
-    for (int i = 0; SLOT_BITMAP_ELEM_COUNT > i; i++)
-        instance->slot_bitmap[i] = -1LL;
 
     if (0 == instance->config.vcpu_count)
     {
@@ -234,17 +227,11 @@ vm_result_t vm_mmap(vm_t *instance,
     map->guest_address = guest_address;
 
     pthread_mutex_lock(&instance->mmap_lock);
-    for (int i = 0; SLOT_BITMAP_ELEM_COUNT > i; i++)
+    map->slot = bmap_find(instance->slot_bmap, bmap_capacity(instance->slot_bmap), 0);
+    if (map->slot < bmap_capacity(instance->slot_bmap))
     {
-        int s = __builtin_ffsll(instance->slot_bitmap[i]);
-        if (0 != s)
-        {
-            s--;
-            map->slot = i * SLOT_BITMAP_ELEM_BITS + s;
-            map->has_slot = 1;
-            instance->slot_bitmap[i] &= ~(1 << s);
-            break;
-        }
+        map->has_slot = 1;
+        bmap_set(instance->slot_bmap, map->slot, 1);
     }
     pthread_mutex_unlock(&instance->mmap_lock);
     if (!map->has_slot)
@@ -353,8 +340,7 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
     if (map->has_slot)
     {
         pthread_mutex_lock(&instance->mmap_lock);
-        instance->slot_bitmap[map->slot / SLOT_BITMAP_ELEM_BITS] |=
-            1 << (map->slot % SLOT_BITMAP_ELEM_BITS);
+        bmap_set(instance->slot_bmap, map->slot, 0);
         pthread_mutex_unlock(&instance->mmap_lock);
     }
 
