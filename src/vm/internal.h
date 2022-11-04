@@ -243,8 +243,8 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #include <sys/types.h>
 #include <unistd.h>
 
-#define EXEMAIN struct exemain_unused__ {}
-#define LIBMAIN struct libmain_unused__ {}
+#define EXEMAIN struct exemain__unused__ {}
+#define LIBMAIN struct libmain__unused__ {}
 
 #endif
 
