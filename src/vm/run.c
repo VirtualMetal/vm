@@ -16,20 +16,23 @@
 vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
 {
     /* command/command-with-index macros */
-#define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) && (p += sizeof S))
+#define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) && \
+    (bmap_set(valid, (unsigned)(pp - text_config), 1), p += sizeof S))
 #define CMI(S,L,U)\
     (0 == invariant_strncmp(p, S, sizeof S - 1) && \
     (cmi = (unsigned)strtoullint(p + sizeof S - 1, &cmip, +10), '=' == *cmip) && \
     (L) <= cmi && cmi <= (U) && \
-    (p = cmip + 1))
+    (bmap_set(valid, (unsigned)(pp - text_config), 1), p = cmip + 1))
     /* check macro */
-#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, pp - text_config); goto exit; }
+#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, pp - text_config + 1); goto exit; }
     /* page offset/length macros -- work for AMD64; also for ARM64 with a 4KB granule */
 #define PGO(P,L)(((P) & (0x0000ff8000000000ULL >> (((L) - 1) * 9))) >> (48 - (L) * 9) << 3)
 #define PGL(L)  ((0x8000000000ULL >> (((L) - 1) * 9)))
 
     vm_result_t result;
     vm_config_t config;
+    unsigned config_count, invalid_index;
+    bmap_t valid[bmap_declcount(4096)] = { 0 };
     vm_t *instance = 0;
     vm_count_t guest_address, length, count, page_address;
     vm_mmap_t *map;
@@ -39,7 +42,20 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     config = *default_config;
     config.debug_log = 0;
 
-    for (char **pp = text_config, *p = *pp++; p; p = *pp++)
+    config_count = 0;
+    for (char **pp = text_config, *p = *pp; p; p = *++pp)
+    {
+        config_count++;
+        if ('#' == *p || '\0' == *p)
+            bmap_set(valid, (unsigned)(pp - text_config), 1);
+    }
+    if (bmap_capacity(valid) < config_count)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    for (char **pp = text_config, *p = *pp; p; p = *++pp)
     {
         if (CMD("debug_log"))
         {
@@ -76,7 +92,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     if (!vm_result_check(result))
         goto exit;
 
-    for (char **pp = text_config, *p = *pp++; p; p = *pp++)
+    for (char **pp = text_config, *p = *pp; p; p = *++pp)
     {
         if (CMD("mmap"))
         {
@@ -107,7 +123,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
         }
     }
 
-    for (char **pp = text_config, *p = *pp++; p; p = *pp++)
+    for (char **pp = text_config, *p = *pp; p; p = *++pp)
     {
         if (CMI("pg", 1, 4))
         {
@@ -149,6 +165,12 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
                 }
             }
         }
+    }
+
+    if ((invalid_index = bmap_find(valid, bmap_capacity(valid), 0)) < config_count)
+    {
+        result = vm_result(VM_ERROR_MISUSE, invalid_index + 1);
+        goto exit;
     }
 
     result = vm_start(instance);

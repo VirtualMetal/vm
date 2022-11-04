@@ -249,6 +249,145 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #endif
 
 /*
+ * bitmaps
+ */
+
+typedef unsigned long long bmap_t;
+
+#define bmap_declcount(capacity)        ((capacity) >> bmap__shift__())
+#define bmap_capacity(bmap)             (sizeof(bmap) << 3)
+#define bmap__shift__()                 (6)
+#define bmap__mask__()                  (0x3f)
+
+static inline
+unsigned bmap_get(bmap_t *bmap, unsigned pos)
+{
+#if defined(_MSC_VER)
+    return _bittest64(&bmap[pos >> bmap__shift__()], pos & bmap__mask__());
+#elif defined(__GNUC__)
+    return !!(bmap[pos >> bmap__shift__()] & ((bmap_t)1 << (pos & bmap__mask__())));
+#endif
+}
+
+static inline
+void bmap_set(bmap_t *bmap, unsigned pos, unsigned val)
+{
+    if (val)
+        bmap[pos >> bmap__shift__()] |= ((bmap_t)1 << (pos & bmap__mask__()));
+    else
+        bmap[pos >> bmap__shift__()] &= ~((bmap_t)1 << (pos & bmap__mask__()));
+}
+
+static inline
+unsigned bmap_popcount(bmap_t *bmap, unsigned capacity)
+{
+    unsigned res = 0;
+    for (unsigned pos = 0, cnt = bmap_declcount(capacity); cnt > pos; pos++)
+    {
+        bmap_t bval = bmap[pos];
+#if defined(_MSC_VER)
+        res += (unsigned)__popcnt64(bval);
+#elif defined(__GNUC__)
+        res += (unsigned)__builtin_popcountll(bval);
+#endif
+    }
+    return res;
+}
+
+static inline
+unsigned bmap_find(bmap_t *bmap, unsigned capacity, unsigned val)
+{
+    for (unsigned idx = 0, cnt = bmap_declcount(capacity); cnt > idx; idx++)
+    {
+        bmap_t bval = val ? bmap[idx] : ~bmap[idx];
+        unsigned bpos;
+#if defined(_MSC_VER)
+        if (_BitScanForward64(&bpos, bval))
+            return (idx << bmap__shift__()) | bpos;
+#elif defined(__GNUC__)
+        if (0 != (bpos = (unsigned)__builtin_ffsll((long long)bval)))
+            return (idx << bmap__shift__()) | (bpos - 1);
+#endif
+    }
+    return ~0U;
+}
+
+/*
+ * linked lists
+ */
+
+typedef struct list_link
+{
+    struct list_link *next, *prev;
+} list_link_t;
+
+static inline
+void list_init(list_link_t *list)
+{
+    list->next = list;
+    list->prev = list;
+}
+
+static inline
+int list_is_empty(list_link_t *list)
+{
+    return list->next == list;
+}
+
+static inline
+void list_insert_after(list_link_t *list, list_link_t *link)
+{
+    list_link_t *next = list->next;
+    link->next = next;
+    link->prev = list;
+    next->prev = link;
+    list->next = link;
+}
+
+static inline
+void list_insert_before(list_link_t *list, list_link_t *link)
+{
+    list_link_t *prev = list->prev;
+    link->next = list;
+    link->prev = prev;
+    prev->next = link;
+    list->prev = link;
+}
+
+static inline
+list_link_t *list_remove_after(list_link_t *list)
+{
+    list_link_t *link = list->next;
+    list_link_t *next = link->next;
+    list->next = next;
+    next->prev = list;
+    return link;
+}
+
+static inline
+list_link_t *list_remove_before(list_link_t *list)
+{
+    list_link_t *link = list->prev;
+    list_link_t *prev = link->prev;
+    prev->next = list;
+    list->prev = prev;
+    return link;
+}
+
+static inline
+void list_remove(list_link_t *link)
+{
+    list_link_t *next = link->next;
+    list_link_t *prev = link->prev;
+    next->prev = prev;
+    prev->next = next;
+}
+
+#define list_traverse(i, dir, l)        \
+    for (list_link_t *i = (l)->dir, *i##__list_temp__; i != (l); i = i##__list_temp__)\
+        if (i##__list_temp__ = i->dir, 0) ; else
+
+/*
  * string operations
  */
 
@@ -337,80 +476,5 @@ VM_INTERNAL_STRNCMP(invariant_strnicmp, char, invariant_toupper)
     }
 VM_INTERNAL_STRTOINT(strtoullint, char, unsigned long long int)
 #undef VM_INTERNAL_STRTOINT
-
-/*
- * linked lists
- */
-
-typedef struct list_link
-{
-    struct list_link *next, *prev;
-} list_link_t;
-
-static inline
-void list_init(list_link_t *list)
-{
-    list->next = list;
-    list->prev = list;
-}
-
-static inline
-int list_is_empty(list_link_t *list)
-{
-    return list->next == list;
-}
-
-static inline
-void list_insert_after(list_link_t *list, list_link_t *link)
-{
-    list_link_t *next = list->next;
-    link->next = next;
-    link->prev = list;
-    next->prev = link;
-    list->next = link;
-}
-
-static inline
-void list_insert_before(list_link_t *list, list_link_t *link)
-{
-    list_link_t *prev = list->prev;
-    link->next = list;
-    link->prev = prev;
-    prev->next = link;
-    list->prev = link;
-}
-
-static inline
-list_link_t *list_remove_after(list_link_t *list)
-{
-    list_link_t *link = list->next;
-    list_link_t *next = link->next;
-    list->next = next;
-    next->prev = list;
-    return link;
-}
-
-static inline
-list_link_t *list_remove_before(list_link_t *list)
-{
-    list_link_t *link = list->prev;
-    list_link_t *prev = link->prev;
-    prev->next = list;
-    list->prev = prev;
-    return link;
-}
-
-static inline
-void list_remove(list_link_t *link)
-{
-    list_link_t *next = link->next;
-    list_link_t *prev = link->prev;
-    next->prev = prev;
-    prev->next = next;
-}
-
-#define list_traverse(i, dir, l)        \
-    for (list_link_t *i = (l)->dir, *i##__list_temp__; i != (l); i = i##__list_temp__)\
-        if (i##__list_temp__ = i->dir, 0) ; else
 
 #endif
