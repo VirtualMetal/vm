@@ -254,7 +254,7 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 
 typedef unsigned long long bmap_t;
 
-#define bmap_declcount(capacity)        ((capacity) >> bmap__shift__())
+#define bmap_declcount(capacity)        (((capacity) + bmap__mask__() - 1) >> bmap__shift__())
 #define bmap_capacity(bmap)             (sizeof(bmap) << 3)
 #define bmap__shift__()                 (6)
 #define bmap__mask__()                  (0x3f)
