@@ -32,7 +32,6 @@
 #if defined(_WIN64)
 
 #include <windows.h>
-#include <fcntl.h>
 
 /*
  * memory operations
@@ -93,32 +92,59 @@ void free(void *Pointer)
  * POSIX-like file I/O
  */
 
-typedef SSIZE_T ssize_t;
-typedef SSIZE_T off_t;
+#undef errno
+#define errno                           GetLastError()
 
 #define STDIN_FILENO                    ((int)(UINT_PTR)GetStdHandle(STD_INPUT_HANDLE))
 #define STDOUT_FILENO                   ((int)(UINT_PTR)GetStdHandle(STD_OUTPUT_HANDLE))
 #define STDERR_FILENO                   ((int)(UINT_PTR)GetStdHandle(STD_ERROR_HANDLE))
 
-#define O_RDONLY                        _O_RDONLY
-#define O_WRONLY                        _O_WRONLY
-#define O_RDWR                          _O_RDWR
-#define O_APPEND                        _O_APPEND
-#define O_CREAT                         _O_CREAT
-#define O_EXCL                          _O_EXCL
-#define O_TRUNC                         _O_TRUNC
+/* O_* flags - compatible with MSVC */
+#define O_RDONLY                        0x0000
+#define O_WRONLY                        0x0001
+#define O_RDWR                          0x0002
+#define O_APPEND                        0x0008
+#define O_CREAT                         0x0100
+#define O_EXCL                          0x0400
+#define O_TRUNC                         0x0200
+
+typedef SSIZE_T ssize_t;
+typedef SSIZE_T off_t;
+
+/* struct stat */
+struct timespec
+{
+    long long tv_sec;
+    long long tv_nsec;
+};
+struct stat
+{
+    unsigned st_dev;
+    unsigned long long st_ino;
+    unsigned st_mode;
+    unsigned short st_nlink;
+    unsigned st_uid;
+    unsigned st_gid;
+    unsigned st_rdev;
+    off_t st_size;
+    struct timespec st_atim;
+    struct timespec st_mtim;
+    struct timespec st_ctim;
+    int st_blksize;
+    long long st_blocks;
+};
 
 static inline
 int open(const char *path, int oflag, ...)
 {
     static DWORD da[] = { GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE, 0 };
     static DWORD cd[] = { OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING, CREATE_ALWAYS };
-    DWORD DesiredAccess = 0 == (oflag & _O_APPEND) ?
-        da[oflag & (_O_RDONLY | _O_WRONLY | _O_RDWR)] :
-        (da[oflag & (_O_RDONLY | _O_WRONLY | _O_RDWR)] & ~FILE_WRITE_DATA) | FILE_APPEND_DATA;
-    DWORD CreationDisposition = (_O_CREAT | _O_EXCL) == (oflag & (_O_CREAT | _O_EXCL)) ?
+    DWORD DesiredAccess = 0 == (oflag & O_APPEND) ?
+        da[oflag & (O_RDONLY | O_WRONLY | O_RDWR)] :
+        (da[oflag & (O_RDONLY | O_WRONLY | O_RDWR)] & ~FILE_WRITE_DATA) | FILE_APPEND_DATA;
+    DWORD CreationDisposition = (O_CREAT | O_EXCL) == (oflag & (O_CREAT | O_EXCL)) ?
         CREATE_NEW :
-        cd[(oflag & (_O_CREAT | _O_TRUNC)) >> 8];
+        cd[(oflag & (O_CREAT | O_TRUNC)) >> 8];
     return (int)(UINT_PTR)CreateFileA(path,
         DesiredAccess, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         0/* default security */,
@@ -129,6 +155,35 @@ static inline
 int close(int fd)
 {
     return CloseHandle((HANDLE)(UINT_PTR)fd) ? 0 : -1;
+}
+
+static inline
+int fstat(int fd, struct stat *stbuf)
+{
+#define filetime_to_unixtime(FT, UT)    \
+    FileTime = *(PUINT64)&FT - 116444736000000000ULL;\
+    UT = (struct timespec){ .tv_sec = FileTime / 10000000, .tv_nsec = FileTime % 10000000 * 100 };
+
+    HANDLE h = (HANDLE)(UINT_PTR)fd;
+    BY_HANDLE_FILE_INFORMATION FileInfo;
+    INT64 FileTime;
+
+    if (!GetFileInformationByHandle(h, &FileInfo))
+        return -1;
+
+    memset(stbuf, 0, sizeof *stbuf);
+    stbuf->st_ino = ((UINT64)FileInfo.nFileIndexHigh << 32) | ((UINT64)FileInfo.nFileIndexLow);
+    stbuf->st_mode = 0777 |
+        ((FileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 0040000/* S_IFDIR */ : 0);
+    stbuf->st_nlink = (UINT16)FileInfo.nNumberOfLinks;
+    stbuf->st_size = ((UINT64)FileInfo.nFileSizeHigh << 32) | ((UINT64)FileInfo.nFileSizeLow);
+    filetime_to_unixtime(FileInfo.ftLastAccessTime, stbuf->st_atim);
+    filetime_to_unixtime(FileInfo.ftLastWriteTime, stbuf->st_mtim);
+    filetime_to_unixtime(FileInfo.ftLastWriteTime, stbuf->st_ctim);
+
+    return 0;
+
+#undef filetime_to_unixtime
 }
 
 static inline

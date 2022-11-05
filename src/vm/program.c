@@ -56,27 +56,152 @@ void warn(const char *format, ...)
     va_end(ap);
 }
 
+static vm_result_t parse_text_config(const char *path, char ***ptext_config)
+{
+    vm_result_t result;
+    int file = -1;
+    struct stat stbuf;
+    ssize_t bytes;
+    char **text_config = 0, *textbuf = 0, *text;
+    unsigned config_count;
+
+    *ptext_config = 0;
+
+    file = open(path, O_RDONLY);
+    if (-1 == file)
+    {
+        result = vm_result(VM_ERROR_FILE, errno);
+        goto exit;
+    }
+
+    if (-1 == fstat(file, &stbuf))
+    {
+        result = vm_result(VM_ERROR_FILE, errno);
+        goto exit;
+    }
+
+    if (64 * 1024 < stbuf.st_size)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    textbuf = malloc((size_t)stbuf.st_size + 1);
+    if (0 == textbuf)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    bytes = pread(file, textbuf, (size_t)stbuf.st_size, 0);
+    if (-1 == bytes)
+    {
+        result = vm_result(VM_ERROR_FILE, errno);
+        goto exit;
+    }
+    textbuf[bytes++] = '\0';
+
+    text = textbuf;
+    config_count = 0;
+    for (char *p = text, *endp = p + bytes; endp > p; p++)
+    {
+        switch (*p)
+        {
+        case '\r': case '\n':
+            *p = '\0';
+            break;
+        }
+        if (text == p || ('\0' == p[-1] && '\0' != p[0]))
+            config_count++;
+    }
+    config_count++;
+
+    text_config = malloc(config_count * sizeof(void *) + (size_t)bytes);
+    if (0 == text_config)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    memcpy(text_config + config_count, text, (size_t)bytes);
+
+    text = (char *)(text_config + config_count);
+    config_count = 0;
+    for (char *p = text, *endp = p + bytes; endp > p; p++)
+        if (text == p || ('\0' == p[-1] && '\0' != p[0]))
+            text_config[config_count++] = p;
+    text_config[config_count++] = 0;
+
+    *ptext_config = text_config;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    free(textbuf);
+
+    if (-1 != file)
+        close(file);
+
+    if (!vm_result_check(result) && 0 != text_config)
+        free(text_config);
+
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     vm_result_t result;
+    char **text_config;
     vm_config_t default_config;
     int reason;
+
+    text_config = argv + 1;
+    if (2 <= argc)
+    {
+        for (const char *p = argv[1]; *p; p++)
+        {
+#if defined(_WIN64)
+            if ('/' == *p || '\\' == *p)
+#else
+            if ('/' == *p)
+#endif
+            {
+                result = parse_text_config(argv[1], &text_config);
+                if (!vm_result_check(result))
+                    goto exit;
+                break;
+            }
+            else if ('=' == *p)
+                break;
+        }
+    }
 
     memset(&default_config, 0, sizeof default_config);
     default_config.debug_log = warn;
     default_config.vcpu_count = 1;
 
-    result = vm_run(&default_config, argv + 1);
+    result = vm_run(&default_config, text_config);
+
+exit:
+    if (argv + 1 != text_config)
+        free(text_config);
+
     if (vm_result_check(result))
         return 0;
-    else if (VM_ERROR_MISUSE != vm_result_error(result))
-        return 1;
-    else
+    else if (VM_ERROR_MISUSE == vm_result_error(result))
     {
         reason = (int)vm_result_reason(result);
         if (1 <= reason && reason < argc)
             warn("config error: %s", argv[reason]);
+        else
+            warn("config error");
         return 2;
+    }
+    else
+    {
+        warn("error: %d(%x)",
+            (int)(vm_result_error(result) >> 48),
+            (unsigned)vm_result_reason(result));
+        return 1;
     }
 }
 

@@ -107,7 +107,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
                 file = open(p + 1, O_RDONLY);
                 if (-1 == file)
                 {
-                    result = vm_result(VM_ERROR_FILE, 0);
+                    result = vm_result(VM_ERROR_FILE, errno);
                     goto exit;
                 }
             }
