@@ -31,7 +31,7 @@ typedef long long vm_result_t;
 #define VM_ERROR_CONFIG                 (-5LL<<48)  /* configuration error */
 #define VM_ERROR_HYPERVISOR             (-6LL<<48)  /* hypervisor error (e.g. not present) */
 #define VM_ERROR_VCPU                   (-7LL<<48)  /* virtual cpu error (e.g. cannot create) */
-#define VM_ERROR_CANCELLED              (-8LL<<48)  /* processing has been cancelled */
+#define VM_ERROR_TERMINATED             (-8LL<<48)  /* instance has terminated */
 
 #define vm_result(e, r)                 ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
 #define vm_result_error(R)              ((vm_result_t)(R) & VM_RESULT_ERROR_MASK)
@@ -226,7 +226,7 @@ vm_result_t vm_mwrite(vm_t *instance,
  * methods.
  *
  * This function is not thread-safe in general, although it is thread-safe
- * against vm_cancel.
+ * against vm_terminate.
  *
  * @param instance
  *     The VM instance.
@@ -240,10 +240,10 @@ vm_result_t vm_start(vm_t *instance);
  *
  * This function waits until all the instance virtual CPU's have stopped.
  * Virtual CPU's stop either because of an unhandled "exit" or because
- * vm_cancel has been called.
+ * vm_terminate has been called.
  *
  * This function is not thread-safe in general, although it is thread-safe
- * against vm_cancel.
+ * against vm_terminate.
  *
  * @param instance
  *     The VM instance.
@@ -253,7 +253,7 @@ vm_result_t vm_start(vm_t *instance);
 vm_result_t vm_wait(vm_t *instance);
 
 /**
- * Cancel a VM instance.
+ * Terminate a VM instance.
  *
  * This function stops all instance virtual CPU's asynchronously. There is
  * no guarantee that the virtual CPU's have already been stopped when this
@@ -266,7 +266,7 @@ vm_result_t vm_wait(vm_t *instance);
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
-vm_result_t vm_cancel(vm_t *instance);
+vm_result_t vm_terminate(vm_t *instance);
 
 #ifdef __cplusplus
 }

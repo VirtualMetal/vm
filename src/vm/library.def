@@ -10,4 +10,4 @@ EXPORTS
     vm_mwrite
     vm_start
     vm_wait
-    vm_cancel
+    vm_terminate

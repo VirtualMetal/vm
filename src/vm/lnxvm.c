@@ -25,17 +25,17 @@ struct vm
     pthread_mutex_t mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
     bmap_t slot_bmap[bmap_declcount(1024)];     /* ditto */
-    pthread_mutex_t cancel_lock;
+    pthread_mutex_t thread_lock;
     pthread_barrier_t barrier;
-    pthread_t thread;                   /* protected by cancel_lock */
+    pthread_t thread;                   /* protected by thread_lock */
     vm_count_t thread_count;
     vm_result_t thread_result;
     unsigned
-        is_cancelled:1,                 /* protected by cancel_lock */
-        has_mmap_lock:1,
-        has_cancel_lock:1,
-        has_barrier:1,
-        has_thread:1;                   /* protected by cancel_lock */
+        is_terminated:1,                /* protected by thread_lock */
+        has_mmap_lock:1,                /* immutable */
+        has_thread_lock:1,              /* immutable */
+        has_barrier:1,                  /* immutable */
+        has_thread:1;                   /* protected by thread_lock */
 };
 
 struct vm_mmap
@@ -54,9 +54,6 @@ struct vm_mmap
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
 static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
-static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run);
-static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run);
-static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run);
 static void vm_debug_log_mmap(vm_t *instance);
 static void vm_debug_log_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
@@ -104,13 +101,13 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
     instance->has_mmap_lock = 1;
 
-    error = pthread_mutex_init(&instance->cancel_lock, 0);
+    error = pthread_mutex_init(&instance->thread_lock, 0);
     if (0 != error)
     {
         result = vm_result(VM_ERROR_MEMORY, error);
         goto exit;
     }
-    instance->has_cancel_lock = 1;
+    instance->has_thread_lock = 1;
 
     error = pthread_barrier_init(&instance->barrier, 0, 2);
     if (0 != error)
@@ -178,8 +175,8 @@ vm_result_t vm_delete(vm_t *instance)
     if (instance->has_barrier)
         pthread_barrier_destroy(&instance->barrier);
 
-    if (instance->has_cancel_lock)
-        pthread_mutex_destroy(&instance->cancel_lock);
+    if (instance->has_thread_lock)
+        pthread_mutex_destroy(&instance->thread_lock);
 
     if (instance->has_mmap_lock)
         pthread_mutex_destroy(&instance->mmap_lock);
@@ -457,9 +454,9 @@ vm_result_t vm_start(vm_t *instance)
 
     atomic_store(&instance->thread_result, VM_RESULT_SUCCESS);
 
-    pthread_mutex_lock(&instance->cancel_lock);
+    pthread_mutex_lock(&instance->thread_lock);
 
-    if (!instance->is_cancelled)
+    if (!instance->is_terminated)
     {
         instance->thread_count = instance->config.vcpu_count;
 
@@ -478,10 +475,10 @@ vm_result_t vm_start(vm_t *instance)
     else
     {
         error = EINTR; /* ignored */
-        result = vm_result(VM_ERROR_CANCELLED, 0);
+        result = vm_result(VM_ERROR_TERMINATED, 0);
     }
 
-    pthread_mutex_unlock(&instance->cancel_lock);
+    pthread_mutex_unlock(&instance->thread_lock);
 
     if (0 != error)
         goto exit;
@@ -505,31 +502,31 @@ vm_result_t vm_wait(vm_t *instance)
 
     pthread_barrier_wait(&instance->barrier);
 
-    pthread_mutex_lock(&instance->cancel_lock);
+    pthread_mutex_lock(&instance->thread_lock);
 
     pthread_join(instance->thread, &retval);
     instance->has_thread = 0;
 
-    pthread_mutex_unlock(&instance->cancel_lock);
+    pthread_mutex_unlock(&instance->thread_lock);
 
     result = atomic_load(&instance->thread_result);
-    if (VM_ERROR_CANCELLED == vm_result_error(result))
+    if (VM_ERROR_TERMINATED == vm_result_error(result))
         result = VM_RESULT_SUCCESS;
 
 exit:
     return result;
 }
 
-vm_result_t vm_cancel(vm_t *instance)
+vm_result_t vm_terminate(vm_t *instance)
 {
-    pthread_mutex_lock(&instance->cancel_lock);
+    pthread_mutex_lock(&instance->thread_lock);
 
-    instance->is_cancelled = 1;
+    instance->is_terminated = 1;
     if (instance->has_thread)
         pthread_kill(instance->thread, SIG_VCPU_CANCEL);
             /* if target already dead this fails with ESRCH; that's ok, we want to kill it anyway */
 
-    pthread_mutex_unlock(&instance->cancel_lock);
+    pthread_mutex_unlock(&instance->thread_lock);
 
     return VM_RESULT_SUCCESS;
 }
@@ -543,7 +540,7 @@ static void *vm_thread(void *instance0)
     int vcpu_fd = -1;
     struct kvm_run *vcpu_run = MAP_FAILED;
     pthread_t next_thread;
-    int is_first_thread, has_next_thread;
+    int is_first_thread, has_next_thread, has_debug_log;
     struct sigaction action;
     sigset_t sigset;
     int error;
@@ -592,6 +589,11 @@ static void *vm_thread(void *instance0)
         has_next_thread = 1;
     }
 
+
+    has_debug_log = !!instance->config.debug_log;
+
+    /* we are now ready to accept cancel signal */
+
     memset(&action, 0, sizeof action);
     action.sa_handler = vm_thread_signal;
     sigaction(SIG_VCPU_CANCEL, &action, 0);
@@ -605,62 +607,27 @@ static void *vm_thread(void *instance0)
         if (-1 == ioctl(vcpu_fd, KVM_RUN, NULL))
         {
             result = EINTR == errno ?
-                vm_result(VM_ERROR_CANCELLED, EINTR) :
+                vm_result(VM_ERROR_TERMINATED, EINTR) :
                 vm_result(VM_ERROR_VCPU, errno);
             goto exit;
         }
 
-        /*
-         * In order to avoid a big switch statement we use a dispatch table.
-         * So we squash the exit_reason into an index to the table.
-         *
-         * Is this really worth it? Don't know, but I did it anyway.
-         * A sensible person would have done some perf measurements first.
-         */
-#define SQUASH(x)                       ((x) & 0x1f)
-        static vm_result_t (*dispatch[32])(vm_t *instance, struct kvm_run *vcpu_run) =
+        switch (vcpu_run->exit_reason)
         {
-            [0x00] = vm_vcpu_exit_unknown,
-            [0x01] = vm_vcpu_exit_unknown,
-            [0x02] = vm_vcpu_exit_unknown,
-            [0x03] = vm_vcpu_exit_unknown,
-            [0x04] = vm_vcpu_exit_unknown,
-            [0x05] = vm_vcpu_exit_unknown,
-            [0x06] = vm_vcpu_exit_unknown,
-            [0x07] = vm_vcpu_exit_unknown,
-            [0x08] = vm_vcpu_exit_unknown,
-            [0x09] = vm_vcpu_exit_unknown,
-            [0x0a] = vm_vcpu_exit_unknown,
-            [0x0b] = vm_vcpu_exit_unknown,
-            [0x0c] = vm_vcpu_exit_unknown,
-            [0x0d] = vm_vcpu_exit_unknown,
-            [0x0e] = vm_vcpu_exit_unknown,
-            [0x0f] = vm_vcpu_exit_unknown,
-            [0x10] = vm_vcpu_exit_unknown,
-            [0x11] = vm_vcpu_exit_unknown,
-            [0x12] = vm_vcpu_exit_unknown,
-            [0x13] = vm_vcpu_exit_unknown,
-            [0x14] = vm_vcpu_exit_unknown,
-            [0x15] = vm_vcpu_exit_unknown,
-            [0x16] = vm_vcpu_exit_unknown,
-            [0x17] = vm_vcpu_exit_unknown,
-            [0x18] = vm_vcpu_exit_unknown,
-            [0x19] = vm_vcpu_exit_unknown,
-            [0x1a] = vm_vcpu_exit_unknown,
-            [0x1b] = vm_vcpu_exit_unknown,
-            [0x1c] = vm_vcpu_exit_unknown,
-            [0x1d] = vm_vcpu_exit_unknown,
-            [0x1e] = vm_vcpu_exit_unknown,
-            [0x1f] = vm_vcpu_exit_unknown,
+        case KVM_EXIT_IO:
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            break;
 
-            [SQUASH(KVM_EXIT_MMIO)] = vm_vcpu_exit_mmio,
-            [SQUASH(KVM_EXIT_IO)] = vm_vcpu_exit_io,
-        };
-        int index = SQUASH(vcpu_run->exit_reason);
-#undef SQUASH
+        case KVM_EXIT_MMIO:
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            break;
 
-        result = dispatch[index](instance, vcpu_run);
-        if (instance->config.debug_log)
+        default:
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            break;
+        }
+
+        if (has_debug_log)
             vm_debug_log_exit(instance, vcpu_index, vcpu_run, result);
         if (!vm_result_check(result))
             goto exit;
@@ -679,6 +646,13 @@ exit:
         pthread_kill(next_thread, SIG_VCPU_CANCEL);
             /* if target already dead this fails with ESRCH; that's ok, we want to kill it anyway */
         pthread_join(next_thread, &retval);
+    }
+    else if (!is_first_thread)
+    {
+        pthread_mutex_lock(&instance->thread_lock);
+        if (instance->has_thread)
+            pthread_kill(instance->thread, SIG_VCPU_CANCEL);
+        pthread_mutex_unlock(&instance->thread_lock);
     }
 
     if (MAP_FAILED != vcpu_run)
@@ -838,21 +812,6 @@ exit:
     return result;
 
 #endif
-}
-
-static vm_result_t vm_vcpu_exit_unknown(vm_t *instance, struct kvm_run *vcpu_run)
-{
-    return vm_result(VM_ERROR_CANCELLED, 0);
-}
-
-static vm_result_t vm_vcpu_exit_mmio(vm_t *instance, struct kvm_run *vcpu_run)
-{
-    return vm_result(VM_ERROR_CANCELLED, 0);
-}
-
-static vm_result_t vm_vcpu_exit_io(vm_t *instance, struct kvm_run *vcpu_run)
-{
-    return vm_result(VM_ERROR_CANCELLED, 0);
 }
 
 static void vm_debug_log_mmap(vm_t *instance)
