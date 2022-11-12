@@ -24,7 +24,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     (L) <= cmi && cmi <= (U) && \
     (bmap_set(valid, (unsigned)(pp - text_config), 1), p = cmip + 1))
     /* check macro */
-#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_MISUSE, pp - text_config + 1); goto exit; }
+#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_CONFIG, pp - text_config + 1); goto exit; }
     /* page offset/length macros -- work for AMD64; also for ARM64 with a 4KB granule */
 #define PGO(P,L)(((P) & (0x0000ff8000000000ULL >> (((L) - 1) * 9))) >> (48 - (L) * 9) << 3)
 #define PGL(L)  ((0x8000000000ULL >> (((L) - 1) * 9)))
@@ -51,7 +51,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     }
     if (bmap_capacity(valid) < config_count)
     {
-        result = vm_result(VM_ERROR_MISUSE, 0);
+        result = vm_result(VM_ERROR_CONFIG, 0);
         goto exit;
     }
 
@@ -170,7 +170,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     invalid_index = bmap_find(valid, bmap_capacity(valid), 0);
     if (invalid_index < config_count)
     {
-        result = vm_result(VM_ERROR_MISUSE, invalid_index + 1);
+        result = vm_result(VM_ERROR_CONFIG, invalid_index + 1);
         goto exit;
     }
 

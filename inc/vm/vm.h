@@ -28,9 +28,10 @@ typedef long long vm_result_t;
 #define VM_ERROR_MISUSE                 (-2LL<<48)  /* function misuse (e.g. invalid args) */
 #define VM_ERROR_MEMORY                 (-3LL<<48)  /* memory error (e.g. out of memory) */
 #define VM_ERROR_FILE                   (-4LL<<48)  /* file error (e.g. cannot find file) */
-#define VM_ERROR_HYPERVISOR             (-5LL<<48)  /* hypervisor error (e.g. not present) */
-#define VM_ERROR_VCPU                   (-6LL<<48)  /* virtual cpu error (e.g. cannot create) */
-#define VM_ERROR_CANCELLED              (-7LL<<48)  /* processing has been cancelled */
+#define VM_ERROR_CONFIG                 (-5LL<<48)  /* configuration error */
+#define VM_ERROR_HYPERVISOR             (-6LL<<48)  /* hypervisor error (e.g. not present) */
+#define VM_ERROR_VCPU                   (-7LL<<48)  /* virtual cpu error (e.g. cannot create) */
+#define VM_ERROR_CANCELLED              (-8LL<<48)  /* processing has been cancelled */
 
 #define vm_result(e, r)                 ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
 #define vm_result_error(R)              ((vm_result_t)(R) & VM_RESULT_ERROR_MASK)

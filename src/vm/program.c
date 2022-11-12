@@ -56,7 +56,7 @@ void warn(const char *format, ...)
     va_end(ap);
 }
 
-static vm_result_t parse_text_config(const char *path, char ***ptext_config)
+static vm_result_t parse_text_config(const char *path, char ***ptext_config, unsigned *pconfig_count)
 {
     vm_result_t result;
     int file = -1;
@@ -66,6 +66,7 @@ static vm_result_t parse_text_config(const char *path, char ***ptext_config)
     unsigned config_count;
 
     *ptext_config = 0;
+    *pconfig_count = 0;
 
     file = open(path, O_RDONLY);
     if (-1 == file)
@@ -130,9 +131,10 @@ static vm_result_t parse_text_config(const char *path, char ***ptext_config)
     for (char *p = text, *endp = p + bytes; endp > p; p++)
         if (text == p || ('\0' == p[-1] && '\0' != p[0]))
             text_config[config_count++] = p;
-    text_config[config_count++] = 0;
+    text_config[config_count] = 0;
 
     *ptext_config = text_config;
+    *pconfig_count = config_count;
     result = VM_RESULT_SUCCESS;
 
 exit:
@@ -150,11 +152,13 @@ exit:
 int main(int argc, char **argv)
 {
     vm_result_t result;
+    vm_result_t reason;
     char **text_config;
+    unsigned config_count;
     vm_config_t default_config;
-    int reason;
 
     text_config = argv + 1;
+    config_count = (unsigned)(argc - 1);
     if (2 <= argc)
     {
         for (const char *p = argv[1]; *p; p++)
@@ -165,7 +169,7 @@ int main(int argc, char **argv)
             if ('/' == *p)
 #endif
             {
-                result = parse_text_config(argv[1], &text_config);
+                result = parse_text_config(argv[1], &text_config, &config_count);
                 if (!vm_result_check(result))
                     goto exit;
                 break;
@@ -182,16 +186,15 @@ int main(int argc, char **argv)
     result = vm_run(&default_config, text_config);
 
 exit:
-    if (argv + 1 != text_config)
-        free(text_config);
+    /* do not free text_config: it is needed below and will be freed by system */
 
     if (vm_result_check(result))
         return 0;
-    else if (VM_ERROR_MISUSE == vm_result_error(result))
+    else if (VM_ERROR_CONFIG == vm_result_error(result))
     {
-        reason = (int)vm_result_reason(result);
-        if (1 <= reason && reason < argc)
-            warn("config error: %s", argv[reason]);
+        reason = vm_result_reason(result);
+        if (1 <= reason && reason <= config_count)
+            warn("config error: %s", text_config[reason - 1]);
         else
             warn("config error");
         return 2;
