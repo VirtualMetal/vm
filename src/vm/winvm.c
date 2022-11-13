@@ -548,10 +548,6 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         goto exit;
     }
 
-    result = vm_vcpu_init(instance, vcpu_index);
-    if (!vm_result_check(result))
-        goto exit;
-
     /*
      * The following code block is thread-safe because the CreateThread call
      * ensures that we run in a lockstep fashion. This is because the call
@@ -569,6 +565,10 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         }
     }
 
+    result = vm_vcpu_init(instance, vcpu_index);
+    if (!vm_result_check(result))
+        goto exit;
+
     has_debug_log = !!instance->config.debug_log;
 
     for (;;)
@@ -584,10 +584,14 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         switch (exit_context.ExitReason)
         {
         case WHvRunVpExitReasonX64IoPortAccess:
-            result = vm_result(VM_ERROR_TERMINATED, 0);
+            result = vm_result(VM_ERROR_VCPU, 0);
             break;
 
         case WHvRunVpExitReasonMemoryAccess:
+            result = vm_result(VM_ERROR_VCPU, 0);
+            break;
+
+        case WHvRunVpExitReasonX64Halt:
             result = vm_result(VM_ERROR_TERMINATED, 0);
             break;
 
@@ -596,7 +600,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             break;
 
         default:
-            result = vm_result(VM_ERROR_TERMINATED, 0);
+            result = vm_result(VM_ERROR_VCPU, 0);
             break;
         }
 

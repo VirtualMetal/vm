@@ -567,10 +567,6 @@ static void *vm_thread(void *instance0)
     }
     atomic_store_explicit(&vm_thread_vcpu_run, vcpu_run, memory_order_relaxed);
 
-    result = vm_vcpu_init(instance, vcpu_index, vcpu_fd);
-    if (!vm_result_check(result))
-        goto exit;
-
     /*
      * The following code block is thread-safe because the pthread_create call
      * ensures that we run in a lockstep fashion. This is because the call
@@ -589,6 +585,9 @@ static void *vm_thread(void *instance0)
         has_next_thread = 1;
     }
 
+    result = vm_vcpu_init(instance, vcpu_index, vcpu_fd);
+    if (!vm_result_check(result))
+        goto exit;
 
     has_debug_log = !!instance->config.debug_log;
 
@@ -615,15 +614,19 @@ static void *vm_thread(void *instance0)
         switch (vcpu_run->exit_reason)
         {
         case KVM_EXIT_IO:
-            result = vm_result(VM_ERROR_TERMINATED, 0);
+            result = vm_result(VM_ERROR_VCPU, 0);
             break;
 
         case KVM_EXIT_MMIO:
+            result = vm_result(VM_ERROR_VCPU, 0);
+            break;
+
+        case KVM_EXIT_HLT:
             result = vm_result(VM_ERROR_TERMINATED, 0);
             break;
 
         default:
-            result = vm_result(VM_ERROR_TERMINATED, 0);
+            result = vm_result(VM_ERROR_VCPU, 0);
             break;
         }
 
