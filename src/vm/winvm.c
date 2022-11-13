@@ -500,13 +500,17 @@ exit:
 vm_result_t vm_terminate(vm_t *instance)
 {
     /*
-     * Cancel CPU #0, which will end its thread and cancel CPU #1, etc.
+     * We first set is_terminated and then cancel the virtual CPU. In vm_thread
+     * we first create the virtual CPU and then check is_terminated. This
+     * interleaving ensures that termination will work even if it happens while
+     * the instance is being started.
      */
 
     AcquireSRWLockExclusive(&instance->thread_lock);
 
     instance->is_terminated = 1;
     if (0 != instance->thread)
+        /* cancel CPU #0, which will end its thread and cancel CPU #1, etc. */
         WHvCancelRunVirtualProcessor(instance->partition, 0, 0);
 
     ReleaseSRWLockExclusive(&instance->thread_lock);
