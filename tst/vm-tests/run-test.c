@@ -1,5 +1,5 @@
 /**
- * @file vm-tests.c
+ * @file run-test.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */
@@ -14,10 +14,11 @@
 #include <vm/internal.h>
 #include <tlib/testsuite.h>
 
-int main(int argc, char **argv)
+static void run_test(void)
 {
-    TESTSUITE(run_tests);
+}
 
-    tlib_run_tests(argc, argv);
-    return 0;
+void run_tests(void)
+{
+    TEST(run_test);
 }

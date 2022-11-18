@@ -50,5 +50,8 @@
     <ClCompile Include="..\..\..\tst\vm-tests\vm-tests.c">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\tst\vm-tests\run-test.c">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

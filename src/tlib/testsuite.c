@@ -78,6 +78,11 @@ static inline unsigned long long get_time(void)
     #pragma comment(lib, "winmm.lib")
     unsigned long __stdcall timeGetTime(void);
     return timeGetTime();
+#elif defined(__linux__)
+    int clock_gettime(int, struct timespec *);
+    struct timespec ts;
+    clock_gettime(7/*CLOCK_BOOTTIME*/, &ts);
+    return (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL;
 #else
     return (unsigned long long)time(0) * 1000ULL;
 #endif
@@ -107,7 +112,7 @@ static void do_test_default(struct test *test, int testno)
         dispname[sizeof dispname - 1] = '\0';
         test_printf("%s ", dispname);
         unsigned long long d = run_test(test);
-        test_printf("OK %.2fs\n", d);
+        test_printf("OK %u.%02us\n", (unsigned)(d / 1000), (unsigned)((d % 1000) / 10));
     }
     else
         test_printf("--- COMPLETE ---\n");
@@ -233,9 +238,9 @@ void tlib__assert(const char *func, const char *file, int line, const char *expr
 #endif
     file = 0 != p ? p + 1 : file;
     if (0 == func)
-        tlib_printf("%sASSERT(%s) failed at: %s:%d\n", assert_buf, expr, file, line);
+        test_printf("%sASSERT(%s) failed at: %s:%d\n", assert_buf, expr, file, line);
     else
-        tlib_printf("%sASSERT(%s) failed at %s:%d:%s\n", assert_buf, expr, file, line, func);
+        test_printf("%sASSERT(%s) failed at %s:%d:%s\n", assert_buf, expr, file, line, func);
     if (0 != test_jmp)
         longjmp(*test_jmp, 1);
 }
