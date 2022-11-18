@@ -37,6 +37,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     vm_count_t guest_address, length, count, page_address;
     vm_mmap_t *map;
     int file;
+    char mbuf[1024];
     char *cmip; unsigned cmi;
 
     config = *default_config;
@@ -166,6 +167,27 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
                     }
                 }
             }
+        }
+        else
+        if (CMD("data"))
+        {
+            guest_address = strtoullint(p, &p, +1);
+            CHK(',' == *p);
+            count = strtoullint(p + 1, &p, +1);
+            CHK(',' == *p || '\0' == *p);
+            CHK(0 < count && count <= sizeof mbuf);
+            memset(mbuf, 0, count);
+            for (char *q = mbuf, *endq = q + count; *p && *++p && endq > q; q++)
+            {
+                *q = (char)strtoullint(p, &p, +1);
+                CHK(',' == *p || '\0' == *p);
+            }
+            length = count;
+            vm_mwrite(instance,
+                mbuf,
+                guest_address,
+                &length);
+            CHK(count == length);
         }
     }
 
