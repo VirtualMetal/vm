@@ -32,10 +32,15 @@ struct vm
     vm_result_t thread_result;
     unsigned
         is_terminated:1,                /* protected by thread_lock */
+        is_debuggable:1,                /* immutable */
         has_mmap_lock:1,                /* immutable */
         has_thread_lock:1,              /* immutable */
         has_barrier:1,                  /* immutable */
+        has_vm_debug_lock:1,            /* immutable */
+        has_start_debug_event:1,        /* protected by thread_lock */
         has_thread:1;                   /* protected by thread_lock */
+    struct vm_debug *debug;             /* protected by thread_lock */
+    pthread_mutex_t vm_debug_lock;      /* vm_debug serialization lock */
 };
 
 struct vm_mmap
@@ -51,12 +56,57 @@ struct vm_mmap
         has_mapped_region:1;
 };
 
+struct vm_debug
+{
+    vm_debug_events_t events;
+    pthread_cond_t stop_cvar, cont_cvar, wait_cvar;
+        /* use condition variables for synchronization to streamline implementation across platforms */
+    vm_count_t stop_count, cont_count;
+    vm_count_t vcpu_index;
+    vm_count_t bp_count;
+    vm_count_t bp_address[64];
+    uint32_t bp_value[64];
+    unsigned
+        is_debugged:1,
+        is_stopped:1,
+        is_continued:1,
+        single_step:1;
+    struct
+    {
+        pthread_t thread;
+        int has_thread;
+        int vcpu_fd;
+    } thread_data[];
+};
+
+static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength);
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
+static vm_result_t vm_thread_debug_event(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
 static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
+static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step);
+static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
+static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static void vm_debug_log_mmap(vm_t *instance);
+static void vm_debug_log_cancel(vm_t *instance,
+    unsigned vcpu_index, vm_result_t result);
 static void vm_debug_log_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
+
+/*
+ * Register convenience macros
+ *
+ * Expected variables:
+ *
+ * - regn: register names (offsets within kvm_regs / kvm_sregs)
+ * - regc: register count
+ * - regb: register bit length (REGBIT only)
+ * - regl: register total byte length (REGBIT only)
+ */
+#define REGNAM(r)                       regn[regc] = offsetof(struct kvm_regs, r), regc++
+#define SREGNAM(r)                      regn[regc] = offsetof(struct kvm_sregs, r), regc++
+#define REGBIT(b)                       regb[regc - 1] = (b), regl += regb[regc - 1]
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -117,6 +167,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
     instance->has_barrier = 1;
 
+    error = pthread_mutex_init(&instance->vm_debug_lock, 0);
+    if (0 != error)
+    {
+        result = vm_result(VM_ERROR_MEMORY, error);
+        goto exit;
+    }
+    instance->has_vm_debug_lock = 1;
+
     instance->hv_fd = open("/dev/kvm", O_RDWR | O_CLOEXEC);
     if (-1 == instance->hv_fd)
     {
@@ -144,6 +202,9 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
+    if (0 < ioctl(instance->hv_fd, KVM_CHECK_EXTENSION, KVM_CAP_SET_GUEST_DEBUG))
+        instance->is_debuggable = 1;
+
     instance->vm_fd = ioctl(instance->hv_fd, KVM_CREATE_VM, NULL);
     if (-1 == instance->vm_fd)
     {
@@ -163,6 +224,13 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
+    if (0 != instance->debug)
+    {
+        pthread_cond_destroy(&instance->debug->wait_cvar);
+        pthread_cond_destroy(&instance->debug->cont_cvar);
+        pthread_cond_destroy(&instance->debug->stop_cvar);
+    }
+
     while (!list_is_empty(&instance->mmap_list))
         vm_munmap(instance, (vm_mmap_t *)instance->mmap_list.next);
 
@@ -171,6 +239,9 @@ vm_result_t vm_delete(vm_t *instance)
 
     if (-1 != instance->hv_fd)
         close(instance->hv_fd);
+
+    if (instance->has_vm_debug_lock)
+        pthread_mutex_destroy(&instance->vm_debug_lock);
 
     if (instance->has_barrier)
         pthread_barrier_destroy(&instance->barrier);
@@ -181,6 +252,7 @@ vm_result_t vm_delete(vm_t *instance)
     if (instance->has_mmap_lock)
         pthread_mutex_destroy(&instance->mmap_lock);
 
+    free(instance->debug);
     free(instance);
 
     return VM_RESULT_SUCCESS;
@@ -458,6 +530,7 @@ vm_result_t vm_start(vm_t *instance)
 
     if (!instance->is_terminated)
     {
+        instance->has_start_debug_event = 0 != instance->debug && instance->debug->is_debugged;
         instance->thread_count = instance->config.vcpu_count;
 
         sigset_t newset, oldset;
@@ -525,10 +598,290 @@ vm_result_t vm_terminate(vm_t *instance)
     if (instance->has_thread)
         pthread_kill(instance->thread, SIG_VCPU_CANCEL);
             /* if target already dead this fails with ESRCH; that's ok, we want to kill it anyway */
+    if (0 != instance->debug)
+    {
+        pthread_cond_broadcast(&instance->debug->stop_cvar);
+        pthread_cond_broadcast(&instance->debug->cont_cvar);
+        pthread_cond_broadcast(&instance->debug->wait_cvar);
+    }
 
     pthread_mutex_unlock(&instance->thread_lock);
 
     return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength)
+{
+    vm_result_t result;
+
+    pthread_mutex_lock(&instance->vm_debug_lock);
+    pthread_mutex_lock(&instance->thread_lock);
+
+    if (!instance->is_debuggable)
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, 0);
+        goto exit;
+    }
+
+    if ((VM_DEBUG_ATTACH == control && 0 != instance->debug) ||
+        (VM_DEBUG_ATTACH != control && 0 == instance->debug) ||
+        instance->config.vcpu_count <= vcpu_index)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    result = vm_debug_internal(instance, control, vcpu_index, buffer, plength);
+
+exit:
+    pthread_mutex_unlock(&instance->thread_lock);
+    pthread_mutex_unlock(&instance->vm_debug_lock);
+
+    if (!vm_result_check(result) && 0 != plength)
+        *plength = 0;
+
+    return result;
+}
+
+static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength)
+{
+    vm_result_t result;
+    struct vm_debug *debug;
+    int error;
+
+    debug = instance->debug;
+
+    switch (control)
+    {
+    case VM_DEBUG_ATTACH:
+        if (0 != plength && sizeof(vm_debug_events_t) > *plength)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        debug = malloc(sizeof *debug + instance->config.vcpu_count * sizeof debug->thread_data[0]);
+        if (0 == debug)
+        {
+            result = vm_result(VM_ERROR_MEMORY, 0);
+            goto exit;
+        }
+
+        memset(debug, 0, sizeof *debug);
+        if (0 != plength)
+        {
+            debug->events = *(vm_debug_events_t *)buffer;
+            *plength = sizeof(vm_debug_events_t);
+        }
+        debug->cont_count = instance->config.vcpu_count;
+        debug->is_debugged = 1;
+        for (vm_count_t index = 0; instance->config.vcpu_count > index; index++)
+            debug->thread_data[index].vcpu_fd = -1;
+
+        error = pthread_cond_init(&debug->stop_cvar, 0);
+        if (0 != error)
+        {
+            free(debug);
+            result = vm_result(VM_ERROR_MEMORY, error);
+            goto exit;
+        }
+
+        error = pthread_cond_init(&debug->cont_cvar, 0);
+        if (0 != error)
+        {
+            pthread_cond_destroy(&debug->stop_cvar);
+            free(debug);
+            result = vm_result(VM_ERROR_MEMORY, error);
+            goto exit;
+        }
+
+        error = pthread_cond_init(&debug->wait_cvar, 0);
+        if (0 != error)
+        {
+            pthread_cond_destroy(&debug->cont_cvar);
+            pthread_cond_destroy(&debug->stop_cvar);
+            free(debug);
+            result = vm_result(VM_ERROR_MEMORY, error);
+            goto exit;
+        }
+
+        instance->debug = debug;
+        break;
+
+    case VM_DEBUG_DETACH:
+        if (!debug->is_stopped)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        for (vm_count_t index = debug->bp_count - 1; debug->bp_count > index; index--)
+        {
+            vm_count_t length = sizeof debug->bp_address[index];
+            vm_debug_internal(instance, VM_DEBUG_DELBP, 0, &debug->bp_address[index], &length);
+        }
+
+        debug->is_debugged = 0;
+        vm_debug_internal(instance, VM_DEBUG_CONT, 0, 0, 0);
+
+        pthread_cond_destroy(&debug->wait_cvar);
+        pthread_cond_destroy(&debug->cont_cvar);
+        pthread_cond_destroy(&debug->stop_cvar);
+
+        free(debug);
+
+        instance->debug = 0;
+        break;
+
+    case VM_DEBUG_BREAK:
+        if (debug->is_stopped)
+            break;
+
+        if (instance->has_thread)
+        {
+            for (unsigned index = 0; instance->config.vcpu_count > index; index++)
+                if (debug->thread_data[index].has_thread)
+                    pthread_kill(debug->thread_data[index].thread, SIG_VCPU_CANCEL);
+            while (!instance->is_terminated &&
+                !debug->is_stopped)
+                pthread_cond_wait(&debug->stop_cvar, &instance->thread_lock);
+            if (instance->is_terminated)
+            {
+                result = vm_result(VM_ERROR_TERMINATED, 0);
+                goto exit;
+            }
+        }
+        break;
+
+    case VM_DEBUG_CONT:
+    case VM_DEBUG_STEP:
+        if (!debug->is_stopped)
+            break;
+
+        debug->is_stopped = 0;
+        if (instance->has_thread)
+        {
+            debug->is_continued = 1;
+            debug->vcpu_index = vcpu_index;
+            debug->single_step = VM_DEBUG_STEP == control;
+            pthread_cond_broadcast(&debug->wait_cvar);
+            while (!instance->is_terminated &&
+                debug->is_continued)
+                pthread_cond_wait(&debug->cont_cvar, &instance->thread_lock);
+            if (instance->is_terminated)
+            {
+                result = vm_result(VM_ERROR_TERMINATED, 0);
+                goto exit;
+            }
+        }
+        break;
+
+    case VM_DEBUG_GETREGS:
+    case VM_DEBUG_SETREGS:
+        if (!debug->is_stopped)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        if (VM_DEBUG_GETREGS == control)
+            result = vm_vcpu_getregs(instance, debug->thread_data[vcpu_index].vcpu_fd, buffer, plength);
+        else
+            result = vm_vcpu_setregs(instance, debug->thread_data[vcpu_index].vcpu_fd, buffer, plength);
+        if (!vm_result_check(result))
+            goto exit;
+        break;
+
+    case VM_DEBUG_SETBP:
+    case VM_DEBUG_DELBP:
+        if (!debug->is_stopped || sizeof(vm_count_t) > *plength)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        {
+            vm_count_t bp_address = *(vm_count_t *)buffer;
+            vm_count_t index;
+#if defined(__x86_64__)
+            uint32_t bp_value, bp_instr = 0xcc/* INT3 instruction */;
+            vm_count_t bp_length, bp_expected = 1;
+#endif
+
+            *plength = sizeof(vm_count_t);
+
+            for (index = 0; debug->bp_count > index; index++)
+                if (debug->bp_address[index] == bp_address)
+                    break;
+
+            if (VM_DEBUG_SETBP == control && debug->bp_count <= index)
+            {
+                if (sizeof debug->bp_address / sizeof debug->bp_address[0] >
+                    debug->bp_count)
+                {
+                    result = vm_result(VM_ERROR_MISUSE, 0);
+                    goto exit;
+                }
+
+                bp_length = bp_expected;
+                vm_mread(instance, bp_address, &bp_value, &bp_length);
+                if (bp_length != bp_expected)
+                {
+                    result = vm_result(VM_ERROR_MEMORY, 0);
+                    goto exit;
+                }
+
+                vm_mwrite(instance, &bp_instr, bp_address, &bp_length);
+                if (bp_length != bp_expected)
+                {
+                    result = vm_result(VM_ERROR_MEMORY, 0);
+                    goto exit;
+                }
+
+                debug->bp_address[debug->bp_count] = bp_address;
+                debug->bp_value[debug->bp_count] = 0;
+                debug->bp_count++;
+            }
+            else
+            if (VM_DEBUG_DELBP == control && debug->bp_count > index)
+            {
+                bp_length = bp_expected;
+                vm_mread(instance, bp_address, &bp_value, &bp_length);
+                if (bp_length != bp_expected)
+                {
+                    result = vm_result(VM_ERROR_MEMORY, 0);
+                    goto exit;
+                }
+
+                if (bp_value == bp_instr)
+                {
+                    /* only restore original value, if it still contains the breakpoint instruction */
+                    vm_mwrite(instance, &debug->bp_value[index], bp_address, &bp_length);
+                    if (bp_length != bp_expected)
+                    {
+                        result = vm_result(VM_ERROR_MEMORY, 0);
+                        goto exit;
+                    }
+                }
+
+                memmove(debug->bp_address + index, debug->bp_address + index + 1,
+                    (debug->bp_count - index - 1) * sizeof debug->bp_address[0]);
+                debug->bp_count--;
+            }
+        }
+        break;
+
+    default:
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 }
 
 static __thread struct kvm_run *vm_thread_vcpu_run;
@@ -540,7 +893,8 @@ static void *vm_thread(void *instance0)
     int vcpu_fd = -1;
     struct kvm_run *vcpu_run = MAP_FAILED;
     pthread_t next_thread;
-    int is_first_thread, has_next_thread, has_debug_log;
+    int is_first_thread, has_next_thread;
+    int is_terminated, has_debug_event, has_debug_log;
     struct sigaction action;
     sigset_t sigset;
     int error;
@@ -566,6 +920,16 @@ static void *vm_thread(void *instance0)
         goto exit;
     }
     atomic_store_explicit(&vm_thread_vcpu_run, vcpu_run, memory_order_relaxed);
+
+    pthread_mutex_lock(&instance->thread_lock);
+    is_terminated = instance->is_terminated;
+    has_debug_event = instance->has_start_debug_event;
+    pthread_mutex_unlock(&instance->thread_lock);
+    if (is_terminated)
+    {
+        result = vm_result(VM_ERROR_TERMINATED, 0);
+        goto exit;
+    }
 
     /*
      * The following code block is thread-safe because the pthread_create call
@@ -603,11 +967,34 @@ static void *vm_thread(void *instance0)
 
     for (;;)
     {
+        if (has_debug_event)
+        {
+            has_debug_event = 0;
+            result = vm_thread_debug_event(instance, vcpu_index, vcpu_fd);
+            if (!vm_result_check(result))
+                goto exit;
+        }
+
         if (-1 == ioctl(vcpu_fd, KVM_RUN, NULL))
         {
-            result = EINTR == errno ?
-                vm_result(VM_ERROR_TERMINATED, EINTR) :
-                vm_result(VM_ERROR_VCPU, errno);
+            if (EINTR == errno)
+            {
+                result = VM_RESULT_SUCCESS;
+                has_debug_event = 0;
+                pthread_mutex_lock(&instance->thread_lock);
+                if (instance->is_terminated)
+                    result = vm_result(VM_ERROR_TERMINATED, 0);
+                else if (0 != instance->debug && instance->debug->is_debugged)
+                    has_debug_event = 1;
+                pthread_mutex_unlock(&instance->thread_lock);
+                if (has_debug_log)
+                    vm_debug_log_cancel(instance, vcpu_index, result);
+                if (!vm_result_check(result))
+                    goto exit;
+                continue;
+            }
+
+            result = vm_result(VM_ERROR_VCPU, errno);
             goto exit;
         }
 
@@ -619,6 +1006,19 @@ static void *vm_thread(void *instance0)
 
         case KVM_EXIT_MMIO:
             result = vm_result(VM_ERROR_VCPU, 0);
+            break;
+
+        case KVM_EXIT_DEBUG:
+            result = VM_RESULT_SUCCESS;
+            pthread_mutex_lock(&instance->thread_lock);
+            if (0 != instance->debug && instance->debug->is_debugged)
+            {
+                for (unsigned index = 0; instance->config.vcpu_count > index; index++)
+                    if (index != vcpu_index && instance->debug->thread_data[index].has_thread)
+                        pthread_kill(instance->debug->thread_data[index].thread, SIG_VCPU_CANCEL);
+                has_debug_event = 1;
+            }
+            pthread_mutex_unlock(&instance->thread_lock);
             break;
 
         case KVM_EXIT_HLT:
@@ -643,19 +1043,28 @@ exit:
         atomic_compare_exchange_strong(&instance->thread_result, &expected, result);
     }
 
+    pthread_mutex_lock(&instance->thread_lock);
+    instance->is_terminated = 1;
+    if (has_next_thread)
+        pthread_kill(next_thread, SIG_VCPU_CANCEL);
+    else if (!is_first_thread && instance->has_thread)
+        pthread_kill(instance->thread, SIG_VCPU_CANCEL);
+    if (0 != instance->debug)
+    {
+        instance->debug->thread_data[vcpu_index].thread = 0;
+        instance->debug->thread_data[vcpu_index].has_thread = 0;
+        instance->debug->thread_data[vcpu_index].vcpu_fd = -1;
+
+        pthread_cond_broadcast(&instance->debug->stop_cvar);
+        pthread_cond_broadcast(&instance->debug->cont_cvar);
+        pthread_cond_broadcast(&instance->debug->wait_cvar);
+    }
+    pthread_mutex_unlock(&instance->thread_lock);
+
     if (has_next_thread)
     {
         void *retval;
-        pthread_kill(next_thread, SIG_VCPU_CANCEL);
-            /* if target already dead this fails with ESRCH; that's ok, we want to kill it anyway */
         pthread_join(next_thread, &retval);
-    }
-    else if (!is_first_thread)
-    {
-        pthread_mutex_lock(&instance->thread_lock);
-        if (instance->has_thread)
-            pthread_kill(instance->thread, SIG_VCPU_CANCEL);
-        pthread_mutex_unlock(&instance->thread_lock);
     }
 
     if (MAP_FAILED != vcpu_run)
@@ -688,10 +1097,75 @@ static void vm_thread_signal(int signum)
         atomic_store_explicit(&vcpu_run->immediate_exit, 1, memory_order_relaxed);
 }
 
+static vm_result_t vm_thread_debug_event(vm_t *instance, unsigned vcpu_index, int vcpu_fd)
+{
+#define WAITCOND(cond, cvar)            \
+    do                                  \
+    {                                   \
+        if (instance->is_terminated || 0 == (debug = instance->debug) || !debug->is_debugged)\
+            goto skip_debug_event;      \
+        if (cond)                       \
+            break;                      \
+        pthread_cond_wait(cvar, &instance->thread_lock);\
+    } while (1)
+
+    struct vm_debug *debug;
+    int is_terminated = 0, is_debugged = 0, single_step = 0;
+
+    pthread_mutex_lock(&instance->thread_lock);
+
+    if (instance->is_terminated || 0 == (debug = instance->debug) || !debug->is_debugged)
+        goto skip_debug_event;
+
+    debug->thread_data[vcpu_index].thread = pthread_self();
+    debug->thread_data[vcpu_index].has_thread = 1;
+    debug->thread_data[vcpu_index].vcpu_fd = vcpu_fd;
+
+    debug->cont_count--;
+    debug->stop_count++;
+    if (instance->config.vcpu_count == debug->stop_count)
+    {
+        debug->is_stopped = 1;
+        pthread_cond_broadcast(&debug->stop_cvar);
+
+        if (0 != debug->events.stop)
+            debug->events.stop(debug->events.self, instance, ~0ULL/*vcpu_index*/);
+    }
+
+    WAITCOND(
+        debug->is_continued,
+        &debug->wait_cvar);
+
+    debug->stop_count--;
+    debug->cont_count++;
+    if (instance->config.vcpu_count == debug->cont_count)
+    {
+        debug->is_continued = 0;
+        pthread_cond_broadcast(&debug->cont_cvar);
+    }
+    else
+        WAITCOND(
+            instance->config.vcpu_count == debug->cont_count,
+            &debug->cont_cvar);
+
+    is_debugged = debug->is_debugged;
+    single_step = debug->single_step && vcpu_index == debug->vcpu_index;
+
+skip_debug_event:
+    is_terminated = instance->is_terminated;
+    pthread_mutex_unlock(&instance->thread_lock);
+
+    if (is_terminated)
+        return vm_result(VM_ERROR_TERMINATED, 0);
+
+    return vm_vcpu_debug(instance, vcpu_fd, is_debugged, single_step);
+
+#undef WAITCOND
+}
+
 static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd)
 {
 #if defined(__x86_64__)
-
     vm_result_t result;
     void *page = 0;
     vm_count_t length;
@@ -813,7 +1287,212 @@ exit:
     free(page);
 
     return result;
+#endif
+}
 
+static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step)
+{
+    vm_result_t result;
+    struct kvm_guest_debug debug;
+
+    memset(&debug, 0, sizeof debug);
+    if (enable)
+        debug.control =
+            KVM_GUESTDBG_ENABLE |
+            KVM_GUESTDBG_USE_SW_BP |
+            (step ? KVM_GUESTDBG_SINGLESTEP : 0);
+
+    if (-1 == ioctl(vcpu_fd, KVM_SET_GUEST_DEBUG, &debug))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+}
+
+static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength)
+{
+#if defined(__x86_64__)
+    vm_result_t result;
+    struct kvm_regs regs;
+    struct kvm_sregs sregs;
+    uint16_t regn[128];
+    uint8_t regb[128];
+    unsigned regi, genc, regc, regl;
+    uint64_t regv;
+    uint8_t *bufp;
+    vm_count_t length;
+
+    length = *plength;
+    *plength = 0;
+
+    /* see gdb/features/i386/64bit-core.xml; we omit the floating point registers */
+    regc = 0; regl = 0;
+    REGNAM(rax); REGBIT(64);
+    REGNAM(rbx); REGBIT(64);
+    REGNAM(rcx); REGBIT(64);
+    REGNAM(rdx); REGBIT(64);
+    REGNAM(rsi); REGBIT(64);
+    REGNAM(rdi); REGBIT(64);
+    REGNAM(rbp); REGBIT(64);
+    REGNAM(rsp); REGBIT(64);
+    REGNAM(r8); REGBIT(64);
+    REGNAM(r9); REGBIT(64);
+    REGNAM(r10); REGBIT(64);
+    REGNAM(r11); REGBIT(64);
+    REGNAM(r12); REGBIT(64);
+    REGNAM(r13); REGBIT(64);
+    REGNAM(r14); REGBIT(64);
+    REGNAM(r15); REGBIT(64);
+    REGNAM(rip); REGBIT(64);
+    REGNAM(rflags); REGBIT(32);
+    genc = regc; /* general register count */
+    SREGNAM(cs); REGBIT(32);
+    SREGNAM(ss); REGBIT(32);
+    SREGNAM(ds); REGBIT(32);
+    SREGNAM(es); REGBIT(32);
+    SREGNAM(fs); REGBIT(32);
+    SREGNAM(gs); REGBIT(32);
+
+    if (regl > length)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    if (-1 == ioctl(vcpu_fd, (int)KVM_GET_REGS, &regs))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    if (-1 == ioctl(vcpu_fd, (int)KVM_GET_SREGS, &sregs))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    bufp = buffer;
+    for (regi = 0; genc > regi; regi++)
+    {
+        regv = *(uint64_t *)((uint8_t *)&regs + regn[regi]);
+        switch (regb[regi])
+        {
+        case 64:
+            bufp[7] = (uint8_t)(regv >> 56);
+            bufp[6] = (uint8_t)(regv >> 48);
+            bufp[5] = (uint8_t)(regv >> 40);
+            bufp[4] = (uint8_t)(regv >> 32);
+            /* fallthrough */
+        case 32:
+            bufp[3] = (uint8_t)(regv >> 24);
+            bufp[2] = (uint8_t)(regv >> 16);
+            bufp[1] = (uint8_t)(regv >> 8);
+            bufp[0] = (uint8_t)(regv >> 0);
+            break;
+        }
+        bufp += regb[regi];
+    }
+    for (; regc > regi; regi++)
+    {
+        regv = *(uint16_t *)((uint8_t *)&regs + regn[regi] + offsetof(struct kvm_segment, selector));
+        bufp[3] = 0;
+        bufp[2] = 0;
+        bufp[1] = (uint8_t)(regv >> 8);
+        bufp[0] = (uint8_t)(regv >> 0);
+        bufp += regb[regi];
+    }
+
+    *plength = regl;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+#endif
+}
+
+static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength)
+{
+#if defined(__x86_64__)
+    vm_result_t result;
+    struct kvm_regs regs;
+    uint16_t regn[128];
+    uint8_t regb[128];
+    unsigned regi, regc, regl;
+    uint64_t regv;
+    uint8_t *bufp;
+    vm_count_t length;
+
+    length = *plength;
+    *plength = 0;
+
+    /* see gdb/features/i386/64bit-core.xml; we omit the segment and floating point registers */
+    regc = 0; regl = 0;
+    REGNAM(rax); REGBIT(64);
+    REGNAM(rbx); REGBIT(64);
+    REGNAM(rcx); REGBIT(64);
+    REGNAM(rdx); REGBIT(64);
+    REGNAM(rsi); REGBIT(64);
+    REGNAM(rdi); REGBIT(64);
+    REGNAM(rbp); REGBIT(64);
+    REGNAM(rsp); REGBIT(64);
+    REGNAM(r8); REGBIT(64);
+    REGNAM(r9); REGBIT(64);
+    REGNAM(r10); REGBIT(64);
+    REGNAM(r11); REGBIT(64);
+    REGNAM(r12); REGBIT(64);
+    REGNAM(r13); REGBIT(64);
+    REGNAM(r14); REGBIT(64);
+    REGNAM(r15); REGBIT(64);
+    REGNAM(rip); REGBIT(64);
+    REGNAM(rflags); REGBIT(32);
+
+    if (regl > length)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    memset(&regs, 0, sizeof regs);
+
+    bufp = buffer;
+    for (regi = 0; regc > regi; regi++)
+    {
+        regv = 0;
+        switch (regb[regi])
+        {
+        case 64:
+            regv |= (uint64_t)bufp[7] << 56;
+            regv |= (uint64_t)bufp[6] << 48;
+            regv |= (uint64_t)bufp[5] << 40;
+            regv |= (uint64_t)bufp[4] << 32;
+            /* fallthrough */
+        case 32:
+            regv |= (uint64_t)bufp[3] << 24;
+            regv |= (uint64_t)bufp[2] << 16;
+            regv |= (uint64_t)bufp[1] << 8;
+            regv |= (uint64_t)bufp[0] << 0;
+            break;
+        }
+        *(uint64_t *)((uint8_t *)&regs + regn[regi]) = regv;
+        bufp += regb[regi];
+    }
+
+    if (-1 == ioctl(vcpu_fd, KVM_SET_REGS, &regs))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    *plength = regl;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 #endif
 }
 
@@ -830,6 +1509,14 @@ static void vm_debug_log_mmap(vm_t *instance)
     }
 
     pthread_mutex_unlock(&instance->mmap_lock);
+}
+
+static void vm_debug_log_cancel(vm_t *instance,
+    unsigned vcpu_index, vm_result_t result)
+{
+    instance->config.debug_log("[%u] SIG_VCPU_CANCEL() = %d",
+        vcpu_index,
+        (int)(vm_result_error(result) >> 48));
 }
 
 static void vm_debug_log_exit(vm_t *instance,

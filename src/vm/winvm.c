@@ -25,7 +25,12 @@ struct vm
     vm_count_t thread_count;
     vm_result_t thread_result;
     unsigned
-        is_terminated:1;                /* protected by thread_lock */
+        is_terminated:1,                /* protected by thread_lock */
+        is_debuggable:1,                /* immutable */
+        has_start_debug_event:1;        /* protected by thread_lock */
+    vm_count_t debug_enable_count;      /* protected by thread_lock */
+    struct vm_debug *debug;             /* protected by thread_lock */
+    SRWLOCK vm_debug_lock;              /* vm_debug serialization lock */
 };
 
 struct vm_mmap
@@ -41,11 +46,52 @@ struct vm_mmap
         has_mapped_tail:1;
 };
 
+struct vm_debug
+{
+    vm_debug_events_t events;
+    CONDITION_VARIABLE stop_cvar, cont_cvar, wait_cvar;
+        /* use condition variables for synchronization to streamline implementation across platforms */
+    vm_count_t stop_count, cont_count;
+    vm_count_t vcpu_index;
+    vm_count_t bp_count;
+    vm_count_t bp_address[64];
+    UINT32 bp_value[64];
+    unsigned
+        is_debugged:1,
+        is_stopped:1,
+        is_continued:1,
+        single_step:1;
+};
+
+static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength);
 static DWORD WINAPI vm_thread(PVOID instance0);
+static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
+static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step);
+static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
+static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static void vm_debug_log_mmap(vm_t *instance);
 static void vm_debug_log_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
+
+#if defined(_M_X64)
+/*
+ * Register convenience macros
+ *
+ * Expected variables:
+ *
+ * - regn: register names
+ * - regv: register values
+ * - regc: register count
+ * - regb: register bit length (REGBIT only)
+ * - regl: register total byte length (REGBIT only)
+ */
+#define REGNAM(r)                       regn[regc] = WHvX64Register ## r, regc++
+#define REGSET(r)                       regn[regc] = WHvX64Register ## r, regv[regc++]
+#define REGVAL(...)                     (WHV_REGISTER_VALUE){ __VA_ARGS__ }
+#define REGBIT(b)                       regb[regc - 1] = (b), regl += regb[regc - 1]
+#endif
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
@@ -77,6 +123,16 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     InitializeSRWLock(&instance->mmap_lock);
     list_init(&instance->mmap_list);
     InitializeSRWLock(&instance->thread_lock);
+    InitializeSRWLock(&instance->vm_debug_lock);
+
+    hresult = WHvGetCapability(
+        WHvCapabilityCodeExtendedVmExits, &capability, sizeof capability, 0);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+        goto exit;
+    }
+    instance->is_debuggable = !!capability.ExtendedVmExits.ExceptionExit;
 
     if (0 == instance->config.vcpu_count)
     {
@@ -134,6 +190,7 @@ vm_result_t vm_delete(vm_t *instance)
     if (0 != instance->partition)
         WHvDeletePartition(instance->partition);
 
+    free(instance->debug);
     free(instance);
 
     return VM_RESULT_SUCCESS;
@@ -451,6 +508,7 @@ vm_result_t vm_start(vm_t *instance)
 
     if (!instance->is_terminated)
     {
+        instance->has_start_debug_event = 0 != instance->debug && instance->debug->is_debugged;
         instance->thread_count = instance->config.vcpu_count;
         instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
         if (0 == instance->thread)
@@ -510,12 +568,259 @@ vm_result_t vm_terminate(vm_t *instance)
 
     instance->is_terminated = 1;
     if (0 != instance->thread)
-        /* cancel CPU #0, which will end its thread and cancel CPU #1, etc. */
         WHvCancelRunVirtualProcessor(instance->partition, 0, 0);
+    if (0 != instance->debug)
+    {
+        WakeAllConditionVariable(&instance->debug->stop_cvar);
+        WakeAllConditionVariable(&instance->debug->cont_cvar);
+        WakeAllConditionVariable(&instance->debug->wait_cvar);
+    }
 
     ReleaseSRWLockExclusive(&instance->thread_lock);
 
     return VM_RESULT_SUCCESS;
+}
+
+vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength)
+{
+    vm_result_t result;
+
+    AcquireSRWLockExclusive(&instance->vm_debug_lock);
+    AcquireSRWLockExclusive(&instance->thread_lock);
+
+    if (!instance->is_debuggable)
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, 0);
+        goto exit;
+    }
+
+    if ((VM_DEBUG_ATTACH == control && 0 != instance->debug) ||
+        (VM_DEBUG_ATTACH != control && 0 == instance->debug) ||
+        instance->config.vcpu_count <= vcpu_index)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    result = vm_debug_internal(instance, control, vcpu_index, buffer, plength);
+
+exit:
+    ReleaseSRWLockExclusive(&instance->thread_lock);
+    ReleaseSRWLockExclusive(&instance->vm_debug_lock);
+
+    if (!vm_result_check(result) && 0 != plength)
+        *plength = 0;
+
+    return result;
+}
+
+static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength)
+{
+    vm_result_t result;
+    struct vm_debug *debug;
+
+    debug = instance->debug;
+
+    switch (control)
+    {
+    case VM_DEBUG_ATTACH:
+        if (0 != plength && sizeof(vm_debug_events_t) > *plength)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        debug = malloc(sizeof *debug);
+        if (0 == debug)
+        {
+            result = vm_result(VM_ERROR_MEMORY, 0);
+            goto exit;
+        }
+
+        memset(debug, 0, sizeof *debug);
+        if (0 != plength)
+        {
+            debug->events = *(vm_debug_events_t *)buffer;
+            *plength = sizeof(vm_debug_events_t);
+        }
+        InitializeConditionVariable(&debug->stop_cvar);
+        InitializeConditionVariable(&debug->cont_cvar);
+        InitializeConditionVariable(&debug->wait_cvar);
+        debug->cont_count = instance->config.vcpu_count;
+        debug->is_debugged = 1;
+
+        instance->debug = debug;
+        break;
+
+    case VM_DEBUG_DETACH:
+        if (!debug->is_stopped)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        for (vm_count_t index = debug->bp_count - 1; debug->bp_count > index; index--)
+        {
+            vm_count_t length = sizeof debug->bp_address[index];
+            vm_debug_internal(instance, VM_DEBUG_DELBP, 0, &debug->bp_address[index], &length);
+        }
+
+        debug->is_debugged = 0;
+        vm_debug_internal(instance, VM_DEBUG_CONT, 0, 0, 0);
+
+        free(debug);
+
+        instance->debug = 0;
+        break;
+
+    case VM_DEBUG_BREAK:
+        if (debug->is_stopped)
+            break;
+
+        if (0 != instance->thread)
+        {
+            for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
+                WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+            while (!instance->is_terminated &&
+                !debug->is_stopped)
+                SleepConditionVariableSRW(&debug->stop_cvar, &instance->thread_lock, INFINITE, 0);
+            if (instance->is_terminated)
+            {
+                result = vm_result(VM_ERROR_TERMINATED, 0);
+                goto exit;
+            }
+        }
+        break;
+
+    case VM_DEBUG_CONT:
+    case VM_DEBUG_STEP:
+        if (!debug->is_stopped)
+            break;
+
+        debug->is_stopped = 0;
+        if (0 != instance->thread)
+        {
+            debug->is_continued = 1;
+            debug->vcpu_index = vcpu_index;
+            debug->single_step = VM_DEBUG_STEP == control;
+            WakeAllConditionVariable(&debug->wait_cvar);
+            while (!instance->is_terminated &&
+                debug->is_continued)
+                SleepConditionVariableSRW(&debug->cont_cvar, &instance->thread_lock, INFINITE, 0);
+            if (instance->is_terminated)
+            {
+                result = vm_result(VM_ERROR_TERMINATED, 0);
+                goto exit;
+            }
+        }
+        break;
+
+    case VM_DEBUG_GETREGS:
+    case VM_DEBUG_SETREGS:
+        if (!debug->is_stopped)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        if (VM_DEBUG_GETREGS == control)
+            result = vm_vcpu_getregs(instance, (UINT32)vcpu_index, buffer, plength);
+        else
+            result = vm_vcpu_setregs(instance, (UINT32)vcpu_index, buffer, plength);
+        if (!vm_result_check(result))
+            goto exit;
+        break;
+
+    case VM_DEBUG_SETBP:
+    case VM_DEBUG_DELBP:
+        if (!debug->is_stopped || sizeof(vm_count_t) > *plength)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        {
+            vm_count_t bp_address = *(vm_count_t *)buffer;
+            vm_count_t index;
+#if defined(_M_X64)
+            UINT32 bp_value, bp_instr = 0xcc/* INT3 instruction */;
+            vm_count_t bp_length, bp_expected = 1;
+#endif
+
+            *plength = sizeof(vm_count_t);
+
+            for (index = 0; debug->bp_count > index; index++)
+                if (debug->bp_address[index] == bp_address)
+                    break;
+
+            if (VM_DEBUG_SETBP == control && debug->bp_count <= index)
+            {
+                if (sizeof debug->bp_address / sizeof debug->bp_address[0] >
+                    debug->bp_count)
+                {
+                    result = vm_result(VM_ERROR_MISUSE, 0);
+                    goto exit;
+                }
+
+                bp_length = bp_expected;
+                vm_mread(instance, bp_address, &bp_value, &bp_length);
+                if (bp_length != bp_expected)
+                {
+                    result = vm_result(VM_ERROR_MEMORY, 0);
+                    goto exit;
+                }
+
+                vm_mwrite(instance, &bp_instr, bp_address, &bp_length);
+                if (bp_length != bp_expected)
+                {
+                    result = vm_result(VM_ERROR_MEMORY, 0);
+                    goto exit;
+                }
+
+                debug->bp_address[debug->bp_count] = bp_address;
+                debug->bp_value[debug->bp_count] = 0;
+                debug->bp_count++;
+            }
+            else
+            if (VM_DEBUG_DELBP == control && debug->bp_count > index)
+            {
+                bp_length = bp_expected;
+                vm_mread(instance, bp_address, &bp_value, &bp_length);
+                if (bp_length != bp_expected)
+                {
+                    result = vm_result(VM_ERROR_MEMORY, 0);
+                    goto exit;
+                }
+
+                if (bp_value == bp_instr)
+                {
+                    /* only restore original value, if it still contains the breakpoint instruction */
+                    vm_mwrite(instance, &debug->bp_value[index], bp_address, &bp_length);
+                    if (bp_length != bp_expected)
+                    {
+                        result = vm_result(VM_ERROR_MEMORY, 0);
+                        goto exit;
+                    }
+                }
+
+                memmove(debug->bp_address + index, debug->bp_address + index + 1,
+                    (debug->bp_count - index - 1) * sizeof debug->bp_address[0]);
+                debug->bp_count--;
+            }
+        }
+        break;
+
+    default:
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 }
 
 static DWORD WINAPI vm_thread(PVOID instance0)
@@ -524,7 +829,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     vm_t *instance = instance0;
     UINT32 vcpu_index;
     BOOL has_vcpu = FALSE;
-    BOOL is_terminated, has_debug_log;
+    BOOL is_terminated, has_debug_event, has_debug_log;
     HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
     HRESULT hresult;
@@ -541,6 +846,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     AcquireSRWLockExclusive(&instance->thread_lock);
     is_terminated = instance->is_terminated;
+    has_debug_event = instance->has_start_debug_event;
     ReleaseSRWLockExclusive(&instance->thread_lock);
     if (is_terminated)
     {
@@ -573,6 +879,14 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     for (;;)
     {
+        if (has_debug_event)
+        {
+            has_debug_event = FALSE;
+            result = vm_thread_debug_event(instance, vcpu_index);
+            if (!vm_result_check(result))
+                goto exit;
+        }
+
         hresult = WHvRunVirtualProcessor(instance->partition,
             vcpu_index, &exit_context, sizeof exit_context);
         if (FAILED(hresult))
@@ -591,12 +905,32 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             result = vm_result(VM_ERROR_VCPU, 0);
             break;
 
+        case WHvRunVpExitReasonException:
+            result = VM_RESULT_SUCCESS;
+            AcquireSRWLockExclusive(&instance->thread_lock);
+            if (0 != instance->debug && instance->debug->is_debugged)
+            {
+                for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
+                    if (index != vcpu_index)
+                        WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+                has_debug_event = TRUE;
+            }
+            ReleaseSRWLockExclusive(&instance->thread_lock);
+            break;
+
         case WHvRunVpExitReasonX64Halt:
             result = vm_result(VM_ERROR_TERMINATED, 0);
             break;
 
         case WHvRunVpExitReasonCanceled:
-            result = vm_result(VM_ERROR_TERMINATED, 0);
+            result = VM_RESULT_SUCCESS;
+            has_debug_event = FALSE;
+            AcquireSRWLockExclusive(&instance->thread_lock);
+            if (instance->is_terminated)
+                result = vm_result(VM_ERROR_TERMINATED, 0);
+            else if (0 != instance->debug && instance->debug->is_debugged)
+                has_debug_event = TRUE;
+            ReleaseSRWLockExclusive(&instance->thread_lock);
             break;
 
         default:
@@ -614,7 +948,16 @@ exit:
     if (!vm_result_check(result))
         InterlockedCompareExchange64(&instance->thread_result, result, VM_RESULT_SUCCESS);
 
+    AcquireSRWLockExclusive(&instance->thread_lock);
+    instance->is_terminated = 1;
     WHvCancelRunVirtualProcessor(instance->partition, (vcpu_index + 1) % instance->config.vcpu_count, 0);
+    if (0 != instance->debug)
+    {
+        WakeAllConditionVariable(&instance->debug->stop_cvar);
+        WakeAllConditionVariable(&instance->debug->cont_cvar);
+        WakeAllConditionVariable(&instance->debug->wait_cvar);
+    }
+    ReleaseSRWLockExclusive(&instance->thread_lock);
 
     if (0 != next_thread)
     {
@@ -628,21 +971,79 @@ exit:
     return 0;
 }
 
+static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index)
+{
+#define WAITCOND(cond, cvar)            \
+    do                                  \
+    {                                   \
+        if (instance->is_terminated || 0 == (debug = instance->debug) || !debug->is_debugged)\
+            goto skip_debug_event;      \
+        if (cond)                       \
+            break;                      \
+        SleepConditionVariableSRW(cvar, &instance->thread_lock, INFINITE, 0);\
+    } while (1)
+
+    struct vm_debug *debug;
+    BOOL is_terminated = FALSE, is_debugged = FALSE, single_step = FALSE;
+
+    AcquireSRWLockExclusive(&instance->thread_lock);
+
+    if (instance->is_terminated || 0 == (debug = instance->debug) || !debug->is_debugged)
+        goto skip_debug_event;
+
+    debug->cont_count--;
+    debug->stop_count++;
+    if (instance->config.vcpu_count == debug->stop_count)
+    {
+        debug->is_stopped = 1;
+        WakeAllConditionVariable(&debug->stop_cvar);
+
+        if (0 != debug->events.stop)
+            debug->events.stop(debug->events.self, instance, ~0ULL/*vcpu_index*/);
+    }
+
+    WAITCOND(
+        debug->is_continued,
+        &debug->wait_cvar);
+
+    debug->stop_count--;
+    debug->cont_count++;
+    if (instance->config.vcpu_count == debug->cont_count)
+    {
+        debug->is_continued = 0;
+        WakeAllConditionVariable(&debug->cont_cvar);
+    }
+    else
+        WAITCOND(
+            instance->config.vcpu_count == debug->cont_count,
+            &debug->cont_cvar);
+
+    is_debugged = debug->is_debugged;
+    single_step = debug->single_step && vcpu_index == debug->vcpu_index;
+
+skip_debug_event:
+    is_terminated = instance->is_terminated;
+    ReleaseSRWLockExclusive(&instance->thread_lock);
+
+    if (is_terminated)
+        return vm_result(VM_ERROR_TERMINATED, 0);
+
+    return vm_vcpu_debug(instance, vcpu_index, is_debugged, single_step);
+
+#undef WAITCOND
+}
+
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
 {
 #if defined(_M_X64)
-#define CLR()                           regc = 0
-#define REG(r)                          reg[regc] = WHvX64Register ## r, val[regc++]
-#define VAL(...)                        (WHV_REGISTER_VALUE){ __VA_ARGS__ }
-
     vm_result_t result;
     void *page = 0;
     vm_count_t length;
     vm_count_t cpu_data_address;
     struct arch_x64_seg_desc seg_desc;
     struct arch_x64_sseg_desc sseg_desc;
-    WHV_REGISTER_NAME reg[128];
-    WHV_REGISTER_VALUE val[128];
+    WHV_REGISTER_NAME regn[128];
+    WHV_REGISTER_VALUE regv[128];
     UINT32 regc;
     HRESULT hresult;
 
@@ -663,28 +1064,28 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         goto exit;
     }
 
-    CLR();
-    REG(Rax) = VAL(0);
-    REG(Rcx) = VAL(0);
-    REG(Rdx) = VAL(0);
-    REG(Rbx) = VAL(0);
-    REG(Rsp) = VAL(0);
-    REG(Rbp) = VAL(0);
-    REG(Rsi) = VAL(0);
-    REG(Rdi) = VAL(0);
-    REG(R8) = VAL(0);
-    REG(R9) = VAL(0);
-    REG(R10) = VAL(0);
-    REG(R11) = VAL(0);
-    REG(R12) = VAL(0);
-    REG(R13) = VAL(0);
-    REG(R14) = VAL(0);
-    REG(R15) = VAL(0);
-    REG(Rip) = VAL(.Reg64 = instance->config.vcpu_entry);
-    REG(Rflags) = VAL(.Reg64 = 2);
+    regc = 0;
+    REGSET(Rax) = REGVAL(0);
+    REGSET(Rcx) = REGVAL(0);
+    REGSET(Rdx) = REGVAL(0);
+    REGSET(Rbx) = REGVAL(0);
+    REGSET(Rsp) = REGVAL(0);
+    REGSET(Rbp) = REGVAL(0);
+    REGSET(Rsi) = REGVAL(0);
+    REGSET(Rdi) = REGVAL(0);
+    REGSET(R8) = REGVAL(0);
+    REGSET(R9) = REGVAL(0);
+    REGSET(R10) = REGVAL(0);
+    REGSET(R11) = REGVAL(0);
+    REGSET(R12) = REGVAL(0);
+    REGSET(R13) = REGVAL(0);
+    REGSET(R14) = REGVAL(0);
+    REGSET(R15) = REGVAL(0);
+    REGSET(Rip) = REGVAL(.Reg64 = instance->config.vcpu_entry);
+    REGSET(Rflags) = REGVAL(.Reg64 = 2);
 
     seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_cs;
-    REG(Cs) = VAL(
+    REGSET(Cs) = REGVAL(
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_cs,
         .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
         .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
@@ -697,7 +1098,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Default = seg_desc.db,
         .Segment.Granularity = seg_desc.g);
     seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_ds;
-    REG(Ds) = VAL(
+    REGSET(Ds) = REGVAL(
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_ds,
         .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
         .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
@@ -709,7 +1110,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Long = seg_desc.l,
         .Segment.Default = seg_desc.db,
         .Segment.Granularity = seg_desc.g);
-    REG(Es) = VAL(
+    REGSET(Es) = REGVAL(
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_ds,
         .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
         .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
@@ -721,7 +1122,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Long = seg_desc.l,
         .Segment.Default = seg_desc.db,
         .Segment.Granularity = seg_desc.g);
-    REG(Ss) = VAL(
+    REGSET(Ss) = REGVAL(
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->km_ds,
         .Segment.Base = (UINT64)(seg_desc.address0 | (seg_desc.address1 << 24)),
         .Segment.Limit = (UINT32)(seg_desc.limit0 | (seg_desc.limit1 << 16)),
@@ -734,7 +1135,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Default = seg_desc.db,
         .Segment.Granularity = seg_desc.g);
     sseg_desc = ((struct arch_x64_cpu_data *)page)->gdt.tss;
-    REG(Tr) = VAL(
+    REGSET(Tr) = REGVAL(
         .Segment.Selector = (UINT16)&((struct arch_x64_gdt *)0)->tss,
         .Segment.Base = (UINT64)(sseg_desc.address0 | (sseg_desc.address1 << 24) | (sseg_desc.address2 << 32)),
         .Segment.Limit = (UINT32)(sseg_desc.limit0 | (sseg_desc.limit1 << 16)),
@@ -746,16 +1147,16 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         .Segment.Long = sseg_desc.l,
         .Segment.Default = sseg_desc.db,
         .Segment.Granularity = sseg_desc.g);
-    REG(Gdtr) = VAL(
+    REGSET(Gdtr) = REGVAL(
         .Table.Base = cpu_data_address + (vm_count_t)&((struct arch_x64_cpu_data *)0)->gdt,
         .Table.Limit = sizeof(struct arch_x64_gdt));
-    REG(Cr0) = VAL(.Reg64 = 0x80000011);    /* PG=1,MP=1,PE=1 */
-    REG(Cr3) = VAL(.Reg64 = instance->config.page_table);
-    REG(Cr4) = VAL(.Reg64 = 0x00000020);    /* PAE=1 */
-    REG(Efer) = VAL(.Reg64 = 0x00000500);   /* LMA=1,LME=1 */
+    REGSET(Cr0) = REGVAL(.Reg64 = 0x80000011);    /* PG=1,MP=1,PE=1 */
+    REGSET(Cr3) = REGVAL(.Reg64 = instance->config.page_table);
+    REGSET(Cr4) = REGVAL(.Reg64 = 0x00000020);    /* PAE=1 */
+    REGSET(Efer) = REGVAL(.Reg64 = 0x00000500);   /* LMA=1,LME=1 */
 
     hresult = WHvSetVirtualProcessorRegisters(instance->partition,
-        vcpu_index, reg, regc, val);
+        vcpu_index, regn, regc, regv);
     if (FAILED(hresult))
     {
         result = vm_result(VM_ERROR_VCPU, hresult);
@@ -768,10 +1169,254 @@ exit:
     free(page);
 
     return result;
+#endif
+}
 
-#undef CLR
-#undef REG
-#undef VAL
+static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step)
+{
+#if defined(_M_X64)
+    vm_result_t result;
+    WHV_PARTITION_PROPERTY property;
+    WHV_REGISTER_NAME regn[1];
+    WHV_REGISTER_VALUE regv[1];
+    UINT32 regc;
+    UINT64 rflags;
+    HRESULT hresult;
+
+    AcquireSRWLockExclusive(&instance->thread_lock);
+    if (( enable && 0 == instance->debug_enable_count++) ||
+        (!enable && 1 == instance->debug_enable_count--))
+    {
+        memset(&property, 0, sizeof property);
+        property.ExtendedVmExits.ExceptionExit = !!enable;
+        hresult = WHvSetPartitionProperty(instance->partition,
+            WHvPartitionPropertyCodeExtendedVmExits, &property, sizeof property);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+
+        memset(&property, 0, sizeof property);
+        property.ExceptionExitBitmap = enable ?
+            (1 << WHvX64ExceptionTypeDebugTrapOrFault) | (1 << WHvX64ExceptionTypeBreakpointTrap) :
+            0;
+        hresult = WHvSetPartitionProperty(instance->partition,
+            WHvPartitionPropertyCodeExceptionExitBitmap, &property, sizeof property);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+    }
+    ReleaseSRWLockExclusive(&instance->thread_lock);
+
+    regc = 0;
+    REGNAM(Rflags);
+
+    hresult = WHvGetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, regn, regc, regv);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    rflags = regv[0].Reg64 & ~0x100;
+    if (enable && step)
+        rflags |= 0x100; /* TF bit */
+
+    regc = 0;
+    REGSET(Rflags) = REGVAL(.Reg64 = rflags);
+
+    hresult = WHvSetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, regn, regc, regv);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+#endif
+}
+
+static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength)
+{
+#if defined(_M_X64)
+    vm_result_t result;
+    WHV_REGISTER_NAME regn[128];
+    WHV_REGISTER_VALUE regv[128];
+    UINT8 regb[128];
+    UINT32 regi, genc, regc, regl;
+    PUINT8 bufp;
+    vm_count_t length;
+    HRESULT hresult;
+
+    length = *plength;
+    *plength = 0;
+
+    /* see gdb/features/i386/64bit-core.xml; we omit the floating point registers */
+    regc = 0; regl = 0;
+    REGNAM(Rax); REGBIT(64);
+    REGNAM(Rbx); REGBIT(64);
+    REGNAM(Rcx); REGBIT(64);
+    REGNAM(Rdx); REGBIT(64);
+    REGNAM(Rsi); REGBIT(64);
+    REGNAM(Rdi); REGBIT(64);
+    REGNAM(Rbp); REGBIT(64);
+    REGNAM(Rsp); REGBIT(64);
+    REGNAM(R8); REGBIT(64);
+    REGNAM(R9); REGBIT(64);
+    REGNAM(R10); REGBIT(64);
+    REGNAM(R11); REGBIT(64);
+    REGNAM(R12); REGBIT(64);
+    REGNAM(R13); REGBIT(64);
+    REGNAM(R14); REGBIT(64);
+    REGNAM(R15); REGBIT(64);
+    REGNAM(Rip); REGBIT(64);
+    REGNAM(Rflags); REGBIT(32);
+    genc = regc; /* general register count */
+    REGNAM(Cs); REGBIT(32);
+    REGNAM(Ss); REGBIT(32);
+    REGNAM(Ds); REGBIT(32);
+    REGNAM(Es); REGBIT(32);
+    REGNAM(Fs); REGBIT(32);
+    REGNAM(Gs); REGBIT(32);
+
+    if (regl > length)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    hresult = WHvGetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, regn, regc, regv);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    bufp = buffer;
+    for (regi = 0; genc > regi; regi++)
+    {
+        switch (regb[regi])
+        {
+        case 64:
+            bufp[7] = (UINT8)(regv[regi].Reg64 >> 56);
+            bufp[6] = (UINT8)(regv[regi].Reg64 >> 48);
+            bufp[5] = (UINT8)(regv[regi].Reg64 >> 40);
+            bufp[4] = (UINT8)(regv[regi].Reg64 >> 32);
+            /* fallthrough */
+        case 32:
+            bufp[3] = (UINT8)(regv[regi].Reg64 >> 24);
+            bufp[2] = (UINT8)(regv[regi].Reg64 >> 16);
+            bufp[1] = (UINT8)(regv[regi].Reg64 >> 8);
+            bufp[0] = (UINT8)(regv[regi].Reg64 >> 0);
+            break;
+        }
+        bufp += regb[regi];
+    }
+    for (; regc > regi; regi++)
+    {
+        bufp[3] = 0;
+        bufp[2] = 0;
+        bufp[1] = (UINT8)(regv[regi].Segment.Selector >> 8);
+        bufp[0] = (UINT8)(regv[regi].Segment.Selector >> 0);
+        bufp += regb[regi];
+    }
+
+    *plength = regl;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+#endif
+}
+
+static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength)
+{
+#if defined(_M_X64)
+    vm_result_t result;
+    WHV_REGISTER_NAME regn[128];
+    WHV_REGISTER_VALUE regv[128];
+    UINT8 regb[128];
+    UINT32 regi, regc, regl;
+    PUINT8 bufp;
+    vm_count_t length;
+    HRESULT hresult;
+
+    length = *plength;
+    *plength = 0;
+
+    /* see gdb/features/i386/64bit-core.xml; we omit the segment and floating point registers */
+    regc = 0; regl = 0;
+    REGNAM(Rax); REGBIT(64);
+    REGNAM(Rbx); REGBIT(64);
+    REGNAM(Rcx); REGBIT(64);
+    REGNAM(Rdx); REGBIT(64);
+    REGNAM(Rsi); REGBIT(64);
+    REGNAM(Rdi); REGBIT(64);
+    REGNAM(Rbp); REGBIT(64);
+    REGNAM(Rsp); REGBIT(64);
+    REGNAM(R8); REGBIT(64);
+    REGNAM(R9); REGBIT(64);
+    REGNAM(R10); REGBIT(64);
+    REGNAM(R11); REGBIT(64);
+    REGNAM(R12); REGBIT(64);
+    REGNAM(R13); REGBIT(64);
+    REGNAM(R14); REGBIT(64);
+    REGNAM(R15); REGBIT(64);
+    REGNAM(Rip); REGBIT(64);
+    REGNAM(Rflags); REGBIT(32);
+
+    if (regl > length)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    memset(regv, 0, sizeof regv);
+
+    bufp = buffer;
+    for (regi = 0; regc > regi; regi++)
+    {
+        regv[regi].Reg64 = 0;
+        switch (regb[regi])
+        {
+        case 64:
+            regv[regi].Reg64 |= (UINT64)bufp[7] << 56;
+            regv[regi].Reg64 |= (UINT64)bufp[6] << 48;
+            regv[regi].Reg64 |= (UINT64)bufp[5] << 40;
+            regv[regi].Reg64 |= (UINT64)bufp[4] << 32;
+            /* fallthrough */
+        case 32:
+            regv[regi].Reg64 |= (UINT64)bufp[3] << 24;
+            regv[regi].Reg64 |= (UINT64)bufp[2] << 16;
+            regv[regi].Reg64 |= (UINT64)bufp[1] << 8;
+            regv[regi].Reg64 |= (UINT64)bufp[0] << 0;
+            break;
+        }
+        bufp += regb[regi];
+    }
+
+    hresult = WHvSetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, regn, regc, regv);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    *plength = regl;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 #endif
 }
 

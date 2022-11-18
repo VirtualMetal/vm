@@ -11,3 +11,4 @@ EXPORTS
     vm_start
     vm_wait
     vm_terminate
+    vm_debug

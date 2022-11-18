@@ -268,6 +268,50 @@ vm_result_t vm_wait(vm_t *instance);
  */
 vm_result_t vm_terminate(vm_t *instance);
 
+#define VM_DEBUG_ATTACH                 ((vm_count_t)'A')   /**< attach debugger to VM instance */
+#define VM_DEBUG_DETACH                 ((vm_count_t)'D')   /**< detach debugger from VM instance */
+#define VM_DEBUG_BREAK                  ((vm_count_t)0x3)   /**< break into debugger */
+#define VM_DEBUG_CONT                   ((vm_count_t)'c')   /**< continue the VM instance */
+#define VM_DEBUG_STEP                   ((vm_count_t)'s')   /**< single step the VM instance */
+#define VM_DEBUG_GETREGS                ((vm_count_t)'g')   /**< get registers (GDB format) */
+#define VM_DEBUG_SETREGS                ((vm_count_t)'G')   /**< set registers (GDB format) */
+#define VM_DEBUG_SETBP                  ((vm_count_t)'Z')   /**< set breakpoint */
+#define VM_DEBUG_DELBP                  ((vm_count_t)'z')   /**< delete breakpoint */
+
+typedef struct vm_debug_events vm_debug_events_t;
+struct vm_debug_events
+{
+    void *self;
+    void (*stop)(void *self, vm_t *instance, vm_count_t reserved);
+};
+
+/**
+ * Debug a VM instance.
+ *
+ * This function controls the debugging functionality of the VM instance.
+ *
+ * This function is thread-safe.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param control
+ *     One of the VM_DEBUG_* codes.
+ * @param vcpu_index
+ *     The virtual CPU index. This parameter is used only for the
+ *     STEP, GET*REG and SET*REG codes.
+ * @param buffer
+ *     The buffer to read/write into. This parameter is used only for the
+ *     ATTACH, *REGS, and *BP codes.
+ * @param plength
+ *     On input it contains the length of the buffer. On output it receives
+ *     the number of bytes read/written. This parameter is used only for the
+ *     ATTACH, *REGS, and *BP codes.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+    void *buffer, vm_count_t *plength);
+
 #ifdef __cplusplus
 }
 #endif

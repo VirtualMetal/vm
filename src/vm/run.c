@@ -32,7 +32,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
     vm_result_t result;
     vm_config_t config;
     unsigned config_count, invalid_index;
-    bmap_t valid[bmap_declcount(4096)] = { 0 };
+    bmap_t valid[bmap_declcount(4096)];
     vm_t *instance = 0;
     vm_count_t guest_address, length, count, page_address;
     vm_mmap_t *map;
@@ -41,6 +41,8 @@ vm_result_t vm_run(const vm_config_t *default_config, char **text_config)
 
     config = *default_config;
     config.debug_log = 0;
+
+    memset(valid, 0, sizeof valid);
 
     config_count = 0;
     for (char **pp = text_config, *p = *pp; p; p = *++pp)
