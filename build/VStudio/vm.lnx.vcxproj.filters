@@ -13,13 +13,13 @@
     <Filter Include="Source\arch">
       <UniqueIdentifier>{0ebe8b7a-c170-4f50-bd2d-cb75e0bb281d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\vm">
+      <UniqueIdentifier>{ea949399-7b82-43d1-86e2-15c39954551e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h">
       <Filter>Include\vm</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\vm\internal.h">
-      <Filter>Source</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\arch\arch.h">
       <Filter>Source\arch</Filter>
@@ -27,16 +27,19 @@
     <ClInclude Include="..\..\src\arch\x64.h">
       <Filter>Source\arch</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\vm\internal.h">
+      <Filter>Source\vm</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\lnxvm.c">
-      <Filter>Source</Filter>
+      <Filter>Source\vm</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\vm\program.c">
-      <Filter>Source</Filter>
+      <Filter>Source\vm</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\vm\run.c">
-      <Filter>Source</Filter>
+      <Filter>Source\vm</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -1,0 +1,54 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Include">
+      <UniqueIdentifier>{7b163b36-e486-40b1-9fca-908c5524fcb0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source">
+      <UniqueIdentifier>{27164d38-57a4-49c1-a52b-5cb1eb24ca4b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\arch">
+      <UniqueIdentifier>{f5f760fc-61fa-4300-adf2-e4324797133f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\tlib">
+      <UniqueIdentifier>{8b2236ba-b7c2-4e94-8d31-04111ef5f3cd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\vm">
+      <UniqueIdentifier>{50a41be0-9031-4719-8395-104b01d61660}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\vm">
+      <UniqueIdentifier>{107401db-a81a-4d14-b0e2-e5c0275f4334}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\..\src\arch\arch.h">
+      <Filter>Source\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\src\arch\x64.h">
+      <Filter>Source\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\src\tlib\testsuite.h">
+      <Filter>Source\tlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\src\vm\internal.h">
+      <Filter>Source\vm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\inc\vm\vm.h">
+      <Filter>Include\vm</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\..\src\tlib\testsuite.c">
+      <Filter>Source\tlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\src\vm\lnxvm.c">
+      <Filter>Source\vm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\src\vm\run.c">
+      <Filter>Source\vm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\tst\vm-tests\vm-tests.c">
+      <Filter>Source</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
