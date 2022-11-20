@@ -114,7 +114,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance = malloc(sizeof *instance);
     if (0 == instance)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
@@ -223,7 +223,7 @@ vm_result_t vm_mmap(vm_t *instance,
     map = malloc(sizeof *map);
     if (0 == map)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
@@ -635,7 +635,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         debug = malloc(sizeof *debug);
         if (0 == debug)
         {
-            result = vm_result(VM_ERROR_MEMORY, 0);
+            result = vm_result(VM_ERROR_RESOURCES, 0);
             goto exit;
         }
 
@@ -1050,7 +1050,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
     page = malloc(sizeof(struct arch_x64_cpu_data));
     if (0 == page)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 

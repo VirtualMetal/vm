@@ -119,7 +119,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance = malloc(sizeof *instance);
     if (0 == instance)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
@@ -146,7 +146,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     error = pthread_mutex_init(&instance->mmap_lock, 0);
     if (0 != error)
     {
-        result = vm_result(VM_ERROR_MEMORY, error);
+        result = vm_result(VM_ERROR_RESOURCES, error);
         goto exit;
     }
     instance->has_mmap_lock = 1;
@@ -154,7 +154,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     error = pthread_mutex_init(&instance->thread_lock, 0);
     if (0 != error)
     {
-        result = vm_result(VM_ERROR_MEMORY, error);
+        result = vm_result(VM_ERROR_RESOURCES, error);
         goto exit;
     }
     instance->has_thread_lock = 1;
@@ -162,7 +162,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     error = pthread_barrier_init(&instance->barrier, 0, 2);
     if (0 != error)
     {
-        result = vm_result(VM_ERROR_MEMORY, error);
+        result = vm_result(VM_ERROR_RESOURCES, error);
         goto exit;
     }
     instance->has_barrier = 1;
@@ -170,7 +170,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     error = pthread_mutex_init(&instance->vm_debug_lock, 0);
     if (0 != error)
     {
-        result = vm_result(VM_ERROR_MEMORY, error);
+        result = vm_result(VM_ERROR_RESOURCES, error);
         goto exit;
     }
     instance->has_vm_debug_lock = 1;
@@ -286,7 +286,7 @@ vm_result_t vm_mmap(vm_t *instance,
     map = malloc(sizeof *map);
     if (0 == map)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
@@ -665,7 +665,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         debug = malloc(sizeof *debug + instance->config.vcpu_count * sizeof debug->thread_data[0]);
         if (0 == debug)
         {
-            result = vm_result(VM_ERROR_MEMORY, 0);
+            result = vm_result(VM_ERROR_RESOURCES, 0);
             goto exit;
         }
 
@@ -684,7 +684,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         if (0 != error)
         {
             free(debug);
-            result = vm_result(VM_ERROR_MEMORY, error);
+            result = vm_result(VM_ERROR_RESOURCES, error);
             goto exit;
         }
 
@@ -693,7 +693,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         {
             pthread_cond_destroy(&debug->stop_cvar);
             free(debug);
-            result = vm_result(VM_ERROR_MEMORY, error);
+            result = vm_result(VM_ERROR_RESOURCES, error);
             goto exit;
         }
 
@@ -703,7 +703,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             pthread_cond_destroy(&debug->cont_cvar);
             pthread_cond_destroy(&debug->stop_cvar);
             free(debug);
-            result = vm_result(VM_ERROR_MEMORY, error);
+            result = vm_result(VM_ERROR_RESOURCES, error);
             goto exit;
         }
 
@@ -1178,7 +1178,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
     page = malloc(sizeof(struct arch_x64_cpu_data));
     if (0 == page)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 

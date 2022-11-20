@@ -55,7 +55,7 @@ static vm_result_t vm_parse_text_config_internal(int *ptconfigc, char ***ptconfi
     index = malloc((size_t)(1 + tconfigc + 1) * sizeof(void *));
     if (0 == index)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
     index[0] = index;
@@ -92,7 +92,7 @@ static vm_result_t vm_parse_text_config_internal(int *ptconfigc, char ***ptconfi
 
         if (VM_PARSE_TEXTLINE_MAX < tconfigc + fconfigc)
         {
-            result = vm_result(VM_ERROR_MEMORY, 0);
+            result = vm_result(VM_ERROR_CONFIG, 0);
             goto exit;
         }
 
@@ -100,7 +100,7 @@ static vm_result_t vm_parse_text_config_internal(int *ptconfigc, char ***ptconfi
             (size_t)(index - (void **)index[-1] + 1 + tconfigc + fconfigc) * sizeof(void *));
         if (0 == newindex)
         {
-            result = vm_result(VM_ERROR_MEMORY, 0);
+            result = vm_result(VM_ERROR_RESOURCES, 0);
             goto exit;
         }
         newindex[index - (void **)index[-1]] = newindex;
@@ -172,14 +172,14 @@ static vm_result_t vm_parse_text_config_file(const char *path,
 
     if (VM_PARSE_TEXTFILE_MAX < stbuf.st_size)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_CONFIG, 0);
         goto exit;
     }
 
     textbuf = malloc((size_t)stbuf.st_size + 1);
     if (0 == textbuf)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
@@ -213,7 +213,7 @@ static vm_result_t vm_parse_text_config_file(const char *path,
     fconfigv = malloc((size_t)(fconfigc + 1) * sizeof(char *));
     if (0 == fconfigv)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
