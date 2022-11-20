@@ -19,6 +19,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\program.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
+    <ClCompile Include="..\..\src\vm\textconf.c" />
     <ClCompile Include="..\..\src\vm\winvm.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

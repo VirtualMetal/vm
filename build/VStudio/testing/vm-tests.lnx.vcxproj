@@ -63,7 +63,9 @@
     <ClCompile Include="..\..\..\src\tlib\testsuite.c" />
     <ClCompile Include="..\..\..\src\vm\lnxvm.c" />
     <ClCompile Include="..\..\..\src\vm\run.c" />
+    <ClCompile Include="..\..\..\src\vm\textconf.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\run-test.c" />
+    <ClCompile Include="..\..\..\tst\vm-tests\textconf-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\vm-tests.c" />
   </ItemGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

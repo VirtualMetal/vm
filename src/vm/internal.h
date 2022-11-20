@@ -228,6 +228,12 @@ ssize_t write(int fd, const void *buf, size_t nbyte)
     return pwrite(fd, buf, nbyte, -1LL);
 }
 
+static inline
+int unlink(const char *path)
+{
+    return DeleteFileA(path) ? 0 : -1;
+}
+
 /*
  * miscellaneous
  */

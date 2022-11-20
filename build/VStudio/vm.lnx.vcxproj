@@ -20,6 +20,7 @@
     <ClCompile Include="..\..\src\vm\lnxvm.c" />
     <ClCompile Include="..\..\src\vm\program.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
+    <ClCompile Include="..\..\src\vm\textconf.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{56da6856-0092-4bec-a55f-24b664f337f2}</ProjectGuid>

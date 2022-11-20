@@ -312,6 +312,33 @@ struct vm_debug_events
 vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
     void *buffer, vm_count_t *plength);
 
+/**
+ * Parse text configuration.
+ *
+ * @param ptconfigc
+ *     On input it contains the count of input configuration items. On output
+ *     it receives the count of output configuration items.
+ * @param ptconfigv
+ *     On input it contains the input configuration items. On output it
+ *     receives the output configuration items. If the output value is
+ *     different from the input value, the output value must be freed using
+ *     vm_free_text_config.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_parse_text_config(int *ptconfigc, char ***ptconfigv);
+
+/**
+ * Free text configuration.
+ *
+ * @param tconfigv
+ *     The text configuration to free, which must have been returned by
+ *     vm_parse_text_config.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_free_text_config(char **tconfigv);
+
 #ifdef __cplusplus
 }
 #endif

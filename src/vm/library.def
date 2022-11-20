@@ -12,3 +12,5 @@ EXPORTS
     vm_wait
     vm_terminate
     vm_debug
+    vm_parse_text_config
+    vm_free_text_config

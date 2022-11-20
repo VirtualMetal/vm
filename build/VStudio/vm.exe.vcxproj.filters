@@ -43,5 +43,8 @@
     <ClCompile Include="..\..\src\vm\winvm.c">
       <Filter>Source\vm</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\vm\textconf.c">
+      <Filter>Source\vm</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

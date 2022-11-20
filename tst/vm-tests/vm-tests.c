@@ -16,6 +16,7 @@
 
 int main(int argc, char **argv)
 {
+    TESTSUITE(textconf_tests);
     TESTSUITE(run_tests);
 
     tlib_run_tests(argc, argv);
