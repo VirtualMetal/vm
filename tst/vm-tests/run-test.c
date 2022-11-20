@@ -58,7 +58,7 @@ static void vm_run_halt_test(void)
 {
     vm_result_t result;
     vm_config_t config;
-    char *text_config[] =
+    char *tconfigv[] =
     {
         "mmap=0,0x10000",
         "pg0=0x1000",
@@ -73,7 +73,7 @@ static void vm_run_halt_test(void)
     memset(&config, 0, sizeof config);
     config.vcpu_count = 1;
 
-    result = vm_run(&config, text_config);
+    result = vm_run(&config, tconfigv);
     ASSERT(vm_result_check(result));
 }
 
