@@ -60,9 +60,14 @@ int main(int argc, char **argv)
 {
     vm_result_t result;
     vm_result_t reason;
+    vm_config_t default_config;
     int tconfigc;
     char **tconfigv;
-    vm_config_t default_config;
+    vm_t *instance = 0;
+
+    memset(&default_config, 0, sizeof default_config);
+    default_config.debug_log = warn;
+    default_config.vcpu_count = 1;
 
     tconfigc = argc - 1;
     tconfigv = argv + 1;
@@ -70,14 +75,14 @@ int main(int argc, char **argv)
     if (!vm_result_check(result))
         goto exit;
 
-    memset(&default_config, 0, sizeof default_config);
-    default_config.debug_log = warn;
-    default_config.vcpu_count = 1;
+    result = vm_run(&default_config, tconfigv, &instance);
+    if (!vm_result_check(result))
+        goto exit;
 
-    result = vm_run(&default_config, tconfigv);
+    result = vm_wait(instance);
 
 exit:
-    /* do not free tconfigv: it is needed below and will be freed by the system */
+    /* do not free tconfigv or instance: they will be freed by the system */
 
     if (vm_result_check(result))
         return 0;

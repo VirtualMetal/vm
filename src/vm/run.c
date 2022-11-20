@@ -13,7 +13,7 @@
 
 #include <vm/internal.h>
 
-vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv)
+vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance)
 {
     /* command/command-with-index macros */
 #define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) && \
@@ -40,6 +40,8 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv)
     int file;
     char mbuf[1024];
     char *cmip; unsigned cmi;
+
+    *pinstance = 0;
 
     config = *default_config;
     config.debug_log = 0;
@@ -203,10 +205,11 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv)
     if (!vm_result_check(result))
         goto exit;
 
-    result = vm_wait(instance);
+    *pinstance = instance;
+    result = VM_RESULT_SUCCESS;
 
 exit:
-    if (0 != instance)
+    if (!vm_result_check(result) && 0 != instance)
         vm_delete(instance);
 
     return result;

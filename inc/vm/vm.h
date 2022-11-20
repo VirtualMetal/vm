@@ -58,9 +58,7 @@ struct vm_config
 /**
  * Run a VM instance with the specified text configuration.
  *
- * This function creates, configures and starts a new VM instance. It then
- * waits until the instance has stopped and then deletes the instance and
- * returns.
+ * This function creates, configures and starts a new VM instance.
  *
  * @param default_config
  *     The default base configuration to use.
@@ -69,7 +67,7 @@ struct vm_config
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
-vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv);
+vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance);
 
 /**
  * Create a new VM instance with the specified configuration.

@@ -54,6 +54,23 @@ static void vm_start_wait_test(void)
     ASSERT(vm_result_check(result));
 }
 
+static void vm_run_error_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    char *tconfigv[] =
+    {
+        "badconfig",
+        0,
+    };
+    vm_t *instance;
+
+    memset(&config, 0, sizeof config);
+
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(VM_ERROR_CONFIG == vm_result_error(result) && 1 == vm_result_reason(result));
+}
+
 static void vm_run_halt_test(void)
 {
     vm_result_t result;
@@ -69,11 +86,18 @@ static void vm_run_halt_test(void)
         "data=0,1,0xf4",
         0,
     };
+    vm_t *instance;
 
     memset(&config, 0, sizeof config);
     config.vcpu_count = 1;
 
-    result = vm_run(&config, tconfigv);
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_wait(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_delete(instance);
     ASSERT(vm_result_check(result));
 }
 
@@ -81,5 +105,6 @@ void run_tests(void)
 {
     TEST(vm_create_delete_test);
     TEST(vm_start_wait_test);
+    TEST(vm_run_error_test);
     TEST(vm_run_halt_test);
 }
