@@ -1503,11 +1503,11 @@ static void vm_debug_log_exit(vm_t *instance,
 
 #if defined(_M_X64)
     instance->config.debug_log(
-        "[%u] %s(cs:rip=%04x:%p, efl=%08x) = %d",
+        "[%u] %s(cs:rip=%04x:%p, efl=%08x) = %s",
         (unsigned)vcpu_index,
         exit_reason_str,
         exit_context->VpContext.Cs.Selector, exit_context->VpContext.Rip,
         (UINT32)exit_context->VpContext.Rflags,
-        (int)(vm_result_error(result) >> 48));
+        vm_result_error_string(result));
 #endif
 }

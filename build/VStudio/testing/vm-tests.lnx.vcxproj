@@ -62,6 +62,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\..\src\tlib\testsuite.c" />
     <ClCompile Include="..\..\..\src\vm\lnxvm.c" />
+    <ClCompile Include="..\..\..\src\vm\result.c" />
     <ClCompile Include="..\..\..\src\vm\run.c" />
     <ClCompile Include="..\..\..\src\vm\textconf.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\run-test.c" />

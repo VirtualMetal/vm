@@ -102,8 +102,8 @@ exit:
     }
     else
     {
-        warn("error: %d(%x)",
-            (int)(vm_result_error(result) >> 48),
+        warn("error: %s(%x)",
+            vm_result_error_string(result),
             (unsigned)vm_result_reason(result));
         return 1;
     }

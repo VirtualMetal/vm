@@ -1514,9 +1514,9 @@ static void vm_debug_log_mmap(vm_t *instance)
 static void vm_debug_log_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result)
 {
-    instance->config.debug_log("[%u] SIG_VCPU_CANCEL() = %d",
+    instance->config.debug_log("[%u] SIG_VCPU_CANCEL() = %s",
         vcpu_index,
-        (int)(vm_result_error(result) >> 48));
+        vm_result_error_string(result));
 }
 
 static void vm_debug_log_exit(vm_t *instance,
@@ -1525,38 +1525,38 @@ static void vm_debug_log_exit(vm_t *instance,
     switch (vcpu_run->exit_reason)
     {
     case KVM_EXIT_UNKNOWN:
-        instance->config.debug_log("[%u] UNKNOWN(hardware_exit_reason=%llu) = %d",
+        instance->config.debug_log("[%u] UNKNOWN(hardware_exit_reason=%llu) = %s",
             vcpu_index,
             (unsigned long long)vcpu_run->hw.hardware_exit_reason,
-            (int)(vm_result_error(result) >> 48));
+            vm_result_error_string(result));
         break;
     case KVM_EXIT_HLT:
-        instance->config.debug_log("[%u] HLT() = %d",
+        instance->config.debug_log("[%u] HLT() = %s",
             vcpu_index,
-            (int)(vm_result_error(result) >> 48));
+            vm_result_error_string(result));
         break;
     case KVM_EXIT_SHUTDOWN:
-        instance->config.debug_log("[%u] SHUTDOWN() = %d",
+        instance->config.debug_log("[%u] SHUTDOWN() = %s",
             vcpu_index,
-            (int)(vm_result_error(result) >> 48));
+            vm_result_error_string(result));
         break;
     case KVM_EXIT_FAIL_ENTRY:
-        instance->config.debug_log("[%u] FAIL_ENTRY(hardware_entry_failure_reason=0x%lx) = %d",
+        instance->config.debug_log("[%u] FAIL_ENTRY(hardware_entry_failure_reason=0x%lx) = %s",
             vcpu_index,
             (unsigned long long)vcpu_run->fail_entry.hardware_entry_failure_reason,
-            (int)(vm_result_error(result) >> 48));
+            vm_result_error_string(result));
         break;
     case KVM_EXIT_INTERNAL_ERROR:
-        instance->config.debug_log("[%u] INTERNAL_ERROR(suberror=%u) = %d",
+        instance->config.debug_log("[%u] INTERNAL_ERROR(suberror=%u) = %s",
             vcpu_index,
             (unsigned)vcpu_run->internal.suberror,
-            (int)(vm_result_error(result) >> 48));
+            vm_result_error_string(result));
         break;
     default:
-        instance->config.debug_log("[%u] EXIT=%x() = %d",
+        instance->config.debug_log("[%u] EXIT=%x() = %s",
             vcpu_index,
             vcpu_run->exit_reason,
-            (int)(vm_result_error(result) >> 48));
+            vm_result_error_string(result));
         break;
     }
 }

@@ -1,4 +1,5 @@
 EXPORTS
+    vm_result_error_string
     vm_run
     vm_create
     vm_delete

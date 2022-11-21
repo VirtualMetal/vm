@@ -39,6 +39,8 @@ typedef long long vm_result_t;
 #define vm_result_reason(R)             ((vm_result_t)(R) & VM_RESULT_REASON_MASK)
 #define vm_result_check(R)              ((vm_result_t)(R) >= VM_RESULT_SUCCESS)
 
+const char *vm_result_error_string(vm_result_t result);
+
 typedef struct vm vm_t;
 typedef struct vm_config vm_config_t;
 typedef struct vm_mmap vm_mmap_t;
