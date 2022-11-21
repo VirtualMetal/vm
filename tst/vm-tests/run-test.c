@@ -101,10 +101,53 @@ static void vm_run_halt_test(void)
     ASSERT(vm_result_check(result));
 }
 
+static void vm_run_terminate_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    char *tconfigv[] =
+    {
+        "mmap=0,0x10000",
+        "pg0=0x1000",
+        "pg1=0x2003",
+        "pg2=0x0083,512",
+        "vcpu_table=0x3000",
+        "vcpu_entry=0x0000",
+        "data=0,2,0xeb,0xfe",           /* jmp 0 */
+        0,
+    };
+    vm_t *instance;
+
+    memset(&config, 0, sizeof config);
+    config.vcpu_count = 0;
+
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(vm_result_check(result));
+
+#if defined(_WIN64)
+    Sleep(300);
+#else
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 300000000;
+    nanosleep(&ts, 0);
+#endif
+
+    result = vm_terminate(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_wait(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_delete(instance);
+    ASSERT(vm_result_check(result));
+}
+
 void run_tests(void)
 {
     TEST(vm_create_delete_test);
     TEST(vm_start_wait_test);
     TEST(vm_run_error_test);
     TEST(vm_run_halt_test);
+    TEST(vm_run_terminate_test);
 }
