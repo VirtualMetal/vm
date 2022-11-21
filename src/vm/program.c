@@ -79,17 +79,22 @@ int main(int argc, char **argv)
     if (!vm_result_check(result))
         goto exit;
 
+    if (tconfigv != argv + 1)
+        vm_free_text_config(tconfigv);
+    tconfigc = 0;
+    tconfigv = 0;
+
     result = vm_wait(instance);
 
 exit:
-    /* do not free tconfigv or instance: they will be freed by the system */
+    /* some resources may not be freed (tconfigv, instance); they will be freed by the system */
 
     if (vm_result_check(result))
         return 0;
     else if (VM_ERROR_CONFIG == vm_result_error(result))
     {
         reason = vm_result_reason(result);
-        if (1 <= reason && reason <= tconfigc)
+        if (1 <= reason && reason <= (unsigned)tconfigc)
             warn("config error: %s", tconfigv[reason - 1]);
         else
             warn("config error");
