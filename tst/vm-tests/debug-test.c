@@ -26,7 +26,7 @@ static void vm_debug_test(void)
         "pg2=0x0083,512",
         "vcpu_table=0x3000",
         "vcpu_entry=0x0000",
-        "data=0,3,0xeb,0xfe,0xf4",      /* jmp 0; hlt */
+        "data=0,4,0xeb,0xfe,0x90,0xf4", /* jmp 0; nop; hlt */
         0,
     };
     vm_t *instance;
@@ -49,11 +49,27 @@ static void vm_debug_test(void)
     result = vm_debug(instance, VM_DEBUG_GETREGS, 0, regs, &regl);
     ASSERT(vm_result_check(result));
 
-    regs[128] = 2; /* rip = 2 */
+    /* set rip = 2; skip over `jmp 0` instruction */
+    regs[128] = 2;
 
     result = vm_debug(instance, VM_DEBUG_SETREGS, 0, regs, &regl);
     ASSERT(vm_result_check(result));
 
+    /* step over `nop` instruction */
+    result = vm_debug(instance, VM_DEBUG_STEP, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    regl = sizeof regs;
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, regs, &regl);
+    ASSERT(vm_result_check(result));
+
+    /* assert rip == 3 */
+    ASSERT(regs[128] == 3);
+
+    /* step over `hlt` instruction; will cause termination */
     result = vm_debug(instance, VM_DEBUG_STEP, 0, 0, 0);
     ASSERT(vm_result_check(result));
 

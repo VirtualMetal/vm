@@ -754,6 +754,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         break;
 
     case VM_DEBUG_BREAK:
+    case VM_DEBUG_WAIT:
         if (instance->is_terminated)
         {
             result = vm_result(VM_ERROR_TERMINATED, 0);
@@ -762,20 +763,19 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         if (debug->is_stopped)
             break;
 
-        debug->stop_on_start = 1;
+        if (VM_DEBUG_BREAK == control)
+            debug->stop_on_start = 1;
         if (instance->has_thread)
         {
-            for (unsigned index = 0; instance->config.vcpu_count > index; index++)
-                if (instance->debug_thread_data[index].has_thread)
-                    pthread_kill(instance->debug_thread_data[index].thread, SIG_VCPU_CANCEL);
+            if (VM_DEBUG_BREAK == control)
+            {
+                for (unsigned index = 0; instance->config.vcpu_count > index; index++)
+                    if (instance->debug_thread_data[index].has_thread)
+                        pthread_kill(instance->debug_thread_data[index].thread, SIG_VCPU_CANCEL);
+            }
             while (!instance->is_terminated &&
                 !debug->is_stopped)
                 pthread_cond_wait(&debug->stop_cvar, &instance->thread_lock);
-            if (instance->is_terminated)
-            {
-                result = vm_result(VM_ERROR_TERMINATED, 0);
-                goto exit;
-            }
         }
         break;
 
@@ -800,11 +800,6 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             while (!instance->is_terminated &&
                 debug->is_continued)
                 pthread_cond_wait(&debug->cont_cvar, &instance->thread_lock);
-            if (instance->is_terminated)
-            {
-                result = vm_result(VM_ERROR_TERMINATED, 0);
-                goto exit;
-            }
         }
         break;
 

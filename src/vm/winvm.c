@@ -687,6 +687,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         break;
 
     case VM_DEBUG_BREAK:
+    case VM_DEBUG_WAIT:
         if (instance->is_terminated)
         {
             result = vm_result(VM_ERROR_TERMINATED, 0);
@@ -695,19 +696,18 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         if (debug->is_stopped)
             break;
 
-        debug->stop_on_start = 1;
+        if (VM_DEBUG_BREAK == control)
+            debug->stop_on_start = 1;
         if (0 != instance->thread)
         {
-            for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
-                WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+            if (VM_DEBUG_BREAK == control)
+            {
+                for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
+                    WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+            }
             while (!instance->is_terminated &&
                 !debug->is_stopped)
                 SleepConditionVariableSRW(&debug->stop_cvar, &instance->thread_lock, INFINITE, 0);
-            if (instance->is_terminated)
-            {
-                result = vm_result(VM_ERROR_TERMINATED, 0);
-                goto exit;
-            }
         }
         break;
 
@@ -732,11 +732,6 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             while (!instance->is_terminated &&
                 debug->is_continued)
                 SleepConditionVariableSRW(&debug->cont_cvar, &instance->thread_lock, INFINITE, 0);
-            if (instance->is_terminated)
-            {
-                result = vm_result(VM_ERROR_TERMINATED, 0);
-                goto exit;
-            }
         }
         break;
 

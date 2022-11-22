@@ -272,6 +272,7 @@ vm_result_t vm_terminate(vm_t *instance);
 #define VM_DEBUG_ATTACH                 ((vm_count_t)'A')   /**< attach debugger to VM instance */
 #define VM_DEBUG_DETACH                 ((vm_count_t)'D')   /**< detach debugger from VM instance */
 #define VM_DEBUG_BREAK                  ((vm_count_t)0x3)   /**< break into debugger */
+#define VM_DEBUG_WAIT                   ((vm_count_t)'w')   /**< wait until VM instance stops */
 #define VM_DEBUG_CONT                   ((vm_count_t)'c')   /**< continue the VM instance */
 #define VM_DEBUG_STEP                   ((vm_count_t)'s')   /**< single step the VM instance */
 #define VM_DEBUG_GETREGS                ((vm_count_t)'g')   /**< get registers (GDB format) */
