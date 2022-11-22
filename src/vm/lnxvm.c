@@ -536,7 +536,11 @@ vm_result_t vm_start(vm_t *instance)
     vm_result_t result;
     int error;
 
-    pthread_mutex_lock(&instance->vm_start_lock);
+    if (0 != pthread_mutex_trylock(&instance->vm_start_lock))
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        return result;
+    }
 
     if (instance->has_vm_start)
     {

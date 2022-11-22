@@ -498,7 +498,11 @@ vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
 
-    AcquireSRWLockExclusive(&instance->vm_start_lock);
+    if (!TryAcquireSRWLockExclusive(&instance->vm_start_lock))
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        return result;
+    }
 
     if (instance->has_vm_start)
     {
