@@ -26,8 +26,7 @@ struct vm
     vm_result_t thread_result;
     unsigned
         is_terminated:1,                /* protected by thread_lock */
-        is_debuggable:1,                /* immutable */
-        has_start_debug_event:1;        /* protected by thread_lock */
+        is_debuggable:1;                /* immutable */
     vm_count_t debug_enable_count;      /* protected by thread_lock */
     struct vm_debug *debug;             /* protected by thread_lock */
     SRWLOCK vm_debug_lock;              /* vm_debug serialization lock */
@@ -60,7 +59,8 @@ struct vm_debug
         is_debugged:1,
         is_stopped:1,
         is_continued:1,
-        single_step:1;
+        single_step:1,
+        stop_on_start:1;
 };
 
 static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
@@ -90,7 +90,7 @@ static void vm_debug_log_exit(vm_t *instance,
 #define REGNAM(r)                       regn[regc] = WHvX64Register ## r, regc++
 #define REGSET(r)                       regn[regc] = WHvX64Register ## r, regv[regc++]
 #define REGVAL(...)                     (WHV_REGISTER_VALUE){ __VA_ARGS__ }
-#define REGBIT(b)                       regb[regc - 1] = (b), regl += regb[regc - 1]
+#define REGBIT(b)                       regb[regc - 1] = (b), regl += regb[regc - 1] >> 3
 #endif
 
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
@@ -508,7 +508,6 @@ vm_result_t vm_start(vm_t *instance)
 
     if (!instance->is_terminated)
     {
-        instance->has_start_debug_event = 0 != instance->debug && instance->debug->is_debugged;
         instance->thread_count = instance->config.vcpu_count;
         instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
         if (0 == instance->thread)
@@ -679,6 +678,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         if (debug->is_stopped)
             break;
 
+        debug->stop_on_start = 1;
         if (0 != instance->thread)
         {
             for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
@@ -699,6 +699,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         if (!debug->is_stopped)
             break;
 
+        debug->stop_on_start = 0;
         debug->is_stopped = 0;
         if (0 != instance->thread)
         {
@@ -846,7 +847,8 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     AcquireSRWLockExclusive(&instance->thread_lock);
     is_terminated = instance->is_terminated;
-    has_debug_event = instance->has_start_debug_event;
+    has_debug_event = 0 != instance->debug && instance->debug->is_debugged &&
+        instance->debug->stop_on_start;
     ReleaseSRWLockExclusive(&instance->thread_lock);
     if (is_terminated)
     {
@@ -910,6 +912,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             AcquireSRWLockExclusive(&instance->thread_lock);
             if (0 != instance->debug && instance->debug->is_debugged)
             {
+                instance->debug->stop_on_start = 1;
                 for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
                     if (index != vcpu_index)
                         WHvCancelRunVirtualProcessor(instance->partition, index, 0);
@@ -1319,7 +1322,7 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buff
             bufp[0] = (UINT8)(regv[regi].Reg64 >> 0);
             break;
         }
-        bufp += regb[regi];
+        bufp += regb[regi] >> 3;
     }
     for (; regc > regi; regi++)
     {
@@ -1327,7 +1330,7 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buff
         bufp[2] = 0;
         bufp[1] = (UINT8)(regv[regi].Segment.Selector >> 8);
         bufp[0] = (UINT8)(regv[regi].Segment.Selector >> 0);
-        bufp += regb[regi];
+        bufp += regb[regi] >> 3;
     }
 
     *plength = regl;
@@ -1401,7 +1404,7 @@ static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buff
             regv[regi].Reg64 |= (UINT64)bufp[0] << 0;
             break;
         }
-        bufp += regb[regi];
+        bufp += regb[regi] >> 3;
     }
 
     hresult = WHvSetVirtualProcessorRegisters(instance->partition,

@@ -299,7 +299,7 @@ struct vm_debug_events
  *     One of the VM_DEBUG_* codes.
  * @param vcpu_index
  *     The virtual CPU index. This parameter is used only for the
- *     STEP, GET*REG and SET*REG codes.
+ *     *REGS codes.
  * @param buffer
  *     The buffer to read/write into. This parameter is used only for the
  *     ATTACH, *REGS, and *BP codes.
