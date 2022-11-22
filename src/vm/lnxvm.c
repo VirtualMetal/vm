@@ -25,6 +25,8 @@ struct vm
     pthread_mutex_t mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
     bmap_t slot_bmap[bmap_declcount(1024)];     /* ditto */
+    pthread_mutex_t vm_start_lock;      /* vm_start/vm_wait serialization lock */
+    int is_started;                     /* protected by vm_start_lock */
     pthread_mutex_t thread_lock;
     pthread_barrier_t barrier;
     pthread_t thread;                   /* protected by thread_lock */
@@ -34,6 +36,7 @@ struct vm
         is_terminated:1,                /* protected by thread_lock */
         is_debuggable:1,                /* immutable */
         has_mmap_lock:1,                /* immutable */
+        has_vm_start_lock:1,            /* immutable */
         has_thread_lock:1,              /* immutable */
         has_barrier:1,                  /* immutable */
         has_vm_debug_lock:1,            /* immutable */
@@ -156,6 +159,14 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
     instance->has_mmap_lock = 1;
 
+    error = pthread_mutex_init(&instance->vm_start_lock, 0);
+    if (0 != error)
+    {
+        result = vm_result(VM_ERROR_RESOURCES, error);
+        goto exit;
+    }
+    instance->has_vm_start_lock = 1;
+
     error = pthread_mutex_init(&instance->thread_lock, 0);
     if (0 != error)
     {
@@ -253,6 +264,9 @@ vm_result_t vm_delete(vm_t *instance)
 
     if (instance->has_thread_lock)
         pthread_mutex_destroy(&instance->thread_lock);
+
+    if (instance->has_vm_start_lock)
+        pthread_mutex_destroy(&instance->vm_start_lock);
 
     if (instance->has_mmap_lock)
         pthread_mutex_destroy(&instance->mmap_lock);
@@ -520,7 +534,9 @@ vm_result_t vm_start(vm_t *instance)
     vm_result_t result;
     int error;
 
-    if (instance->has_thread)
+    pthread_mutex_lock(&instance->vm_start_lock);
+
+    if (instance->is_started)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -529,40 +545,25 @@ vm_result_t vm_start(vm_t *instance)
     if (instance->config.debug_log)
         vm_debug_log_mmap(instance);
 
-    atomic_store(&instance->thread_result, VM_RESULT_SUCCESS);
-
     pthread_mutex_lock(&instance->thread_lock);
 
-    if (!instance->is_terminated)
-    {
-        instance->thread_count = instance->config.vcpu_count;
-
-        sigset_t newset, oldset;
-        sigfillset(&newset);
-        pthread_sigmask(SIG_SETMASK, &newset, &oldset);
-        error = pthread_create(&instance->thread, 0, vm_thread, instance);
-        pthread_sigmask(SIG_SETMASK, &oldset, 0);
-            /* new thread has all signals blocked */
-
-        if (0 != error)
-            result = vm_result(VM_ERROR_VCPU, error);
-        else
-            instance->has_thread = 1;
-    }
-    else
-    {
-        error = EINTR; /* ignored */
-        result = vm_result(VM_ERROR_TERMINATED, 0);
-    }
+    instance->thread_count = instance->config.vcpu_count;
+    sigset_t newset, oldset;
+    sigfillset(&newset);
+    pthread_sigmask(SIG_SETMASK, &newset, &oldset);
+    error = pthread_create(&instance->thread, 0, vm_thread, instance);
+    pthread_sigmask(SIG_SETMASK, &oldset, 0);
+        /* new thread has all signals blocked */
+    result = 0 == error ?
+        VM_RESULT_SUCCESS : vm_result(VM_ERROR_VCPU, error);
+    if (vm_result_check(result))
+        instance->is_started = instance->has_thread = 1;
 
     pthread_mutex_unlock(&instance->thread_lock);
 
-    if (0 != error)
-        goto exit;
-
-    result = VM_RESULT_SUCCESS;
-
 exit:
+    pthread_mutex_unlock(&instance->vm_start_lock);
+
     return result;
 }
 
@@ -571,7 +572,9 @@ vm_result_t vm_wait(vm_t *instance)
     vm_result_t result;
     void *retval;
 
-    if (!instance->has_thread)
+    pthread_mutex_lock(&instance->vm_start_lock);
+
+    if (!instance->is_started)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -591,6 +594,8 @@ vm_result_t vm_wait(vm_t *instance)
         result = VM_RESULT_SUCCESS;
 
 exit:
+    pthread_mutex_unlock(&instance->vm_start_lock);
+
     return result;
 }
 

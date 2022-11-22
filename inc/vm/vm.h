@@ -54,7 +54,7 @@ struct vm_config
     vm_count_t vcpu_table;              /* virtual cpu data table address */
     vm_count_t page_table;              /* page table address */
 
-    vm_count_t reserved[59];
+    vm_count_t reserved[27];
 };
 
 /**
@@ -96,6 +96,8 @@ vm_result_t vm_delete(vm_t *instance);
 /**
  * Map anonymous or file backed host memory to guest memory.
  *
+ * This function is thread-safe if instance remains valid during the call.
+ *
  * @param instance
  *     The VM instance.
  * @param host_address
@@ -119,6 +121,8 @@ vm_result_t vm_mmap(vm_t *instance,
 
 /**
  * Unmap a previous mapping of host memory to guest memory.
+ *
+ * This function is thread-safe if instance remains valid during the call.
  *
  * @param instance
  *     The VM instance.
@@ -177,6 +181,8 @@ vm_result_t vm_mmap_write(vm_mmap_t *map,
  * should not be used on critical paths. It performs a linear search of
  * memory mappings and is slow.
  *
+ * This function is thread-safe if instance remains valid during the call.
+ *
  * @param instance
  *     The VM instance.
  * @param guest_address
@@ -204,6 +210,8 @@ vm_result_t vm_mread(vm_t *instance,
  * should not be used on critical paths. It performs a linear search of
  * memory mappings and is slow.
  *
+ * This function is thread-safe if instance remains valid during the call.
+ *
  * @param instance
  *     The VM instance.
  * @param buffer
@@ -226,8 +234,7 @@ vm_result_t vm_mwrite(vm_t *instance,
  * virtual CPU "exits" and forwards them to the appropriate vm_interface_t
  * methods.
  *
- * This function is not thread-safe in general, although it is thread-safe
- * against vm_terminate.
+ * This function is thread-safe if instance remains valid during the call.
  *
  * @param instance
  *     The VM instance.
@@ -243,8 +250,7 @@ vm_result_t vm_start(vm_t *instance);
  * Virtual CPU's stop either because of an unhandled "exit" or because
  * vm_terminate has been called.
  *
- * This function is not thread-safe in general, although it is thread-safe
- * against vm_terminate.
+ * This function is thread-safe if instance remains valid during the call.
  *
  * @param instance
  *     The VM instance.
@@ -260,7 +266,7 @@ vm_result_t vm_wait(vm_t *instance);
  * no guarantee that the virtual CPU's have already been stopped when this
  * function returns.
  *
- * This function is thread-safe.
+ * This function is thread-safe if instance remains valid during the call.
  *
  * @param instance
  *     The VM instance.
@@ -292,7 +298,7 @@ struct vm_debug_events
  *
  * This function controls the debugging functionality of the VM instance.
  *
- * This function is thread-safe.
+ * This function is thread-safe if instance remains valid during the call.
  *
  * @param instance
  *     The VM instance.

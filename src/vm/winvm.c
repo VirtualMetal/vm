@@ -20,6 +20,8 @@ struct vm
     WHV_PARTITION_HANDLE partition;
     SRWLOCK mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
+    SRWLOCK vm_start_lock;              /* vm_start/vm_wait serialization lock */
+    BOOL is_started;                    /* protected by vm_start_lock */
     SRWLOCK thread_lock;
     HANDLE thread;                      /* protected by thread_lock */
     vm_count_t thread_count;
@@ -122,6 +124,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->config = *config;
     InitializeSRWLock(&instance->mmap_lock);
     list_init(&instance->mmap_list);
+    InitializeSRWLock(&instance->vm_start_lock);
     InitializeSRWLock(&instance->thread_lock);
     InitializeSRWLock(&instance->vm_debug_lock);
 
@@ -493,7 +496,9 @@ vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
 
-    if (0 != instance->thread)
+    AcquireSRWLockExclusive(&instance->vm_start_lock);
+
+    if (instance->is_started)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -502,28 +507,20 @@ vm_result_t vm_start(vm_t *instance)
     if (instance->config.debug_log)
         vm_debug_log_mmap(instance);
 
-    InterlockedExchange64(&instance->thread_result, VM_RESULT_SUCCESS);
-
     AcquireSRWLockExclusive(&instance->thread_lock);
 
-    if (!instance->is_terminated)
-    {
-        instance->thread_count = instance->config.vcpu_count;
-        instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
-        if (0 == instance->thread)
-            result = vm_result(VM_ERROR_VCPU, GetLastError());
-    }
-    else
-        result = vm_result(VM_ERROR_TERMINATED, 0);
+    instance->thread_count = instance->config.vcpu_count;
+    instance->thread = CreateThread(0, 0, vm_thread, instance, 0, 0);
+    result = 0 != instance->thread ?
+        VM_RESULT_SUCCESS : vm_result(VM_ERROR_VCPU, GetLastError());
+    if (vm_result_check(result))
+        instance->is_started = TRUE;
 
     ReleaseSRWLockExclusive(&instance->thread_lock);
 
-    if (0 == instance->thread)
-        goto exit;
-
-    result = VM_RESULT_SUCCESS;
-
 exit:
+    ReleaseSRWLockExclusive(&instance->vm_start_lock);
+
     return result;
 }
 
@@ -531,12 +528,24 @@ vm_result_t vm_wait(vm_t *instance)
 {
     vm_result_t result;
 
-    if (0 == instance->thread)
+    AcquireSRWLockExclusive(&instance->vm_start_lock);
+
+    if (!instance->is_started)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
+    /*
+     * The functions vm_start and vm_wait may read instance->thread when inside the
+     * vm_start_lock, even when outside the thread_lock.
+     *
+     * This works because vm_start and vm_wait are the only writers of instance->thread
+     * and because instance->thread is only ever written when inside both the vm_start_lock
+     * and thread_lock. This excludes readers of instance->thread inside the vm_start_lock
+     * (i.e. vm_start and vm_wait) or readers of instance->thread inside the thread_lock
+     * only (i.e. functions other than vm_start and vm_wait).
+     */
     WaitForSingleObject(instance->thread, INFINITE);
 
     AcquireSRWLockExclusive(&instance->thread_lock);
@@ -551,6 +560,8 @@ vm_result_t vm_wait(vm_t *instance)
         result = VM_RESULT_SUCCESS;
 
 exit:
+    ReleaseSRWLockExclusive(&instance->vm_start_lock);
+
     return result;
 }
 
