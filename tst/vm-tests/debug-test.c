@@ -60,6 +60,9 @@ static void vm_debug_test(void)
     result = vm_wait(instance);
     ASSERT(vm_result_check(result));
 
+    result = vm_debug(instance, VM_DEBUG_DETACH, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
     result = vm_delete(instance);
     ASSERT(vm_result_check(result));
 }

@@ -660,6 +660,11 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
     switch (control)
     {
     case VM_DEBUG_ATTACH:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
         if (0 != plength && sizeof(vm_debug_events_t) > *plength)
         {
             result = vm_result(VM_ERROR_MISUSE, 0);
@@ -713,6 +718,18 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         break;
 
     case VM_DEBUG_DETACH:
+        if (instance->is_terminated)
+        {
+            pthread_cond_destroy(&debug->wait_cvar);
+            pthread_cond_destroy(&debug->cont_cvar);
+            pthread_cond_destroy(&debug->stop_cvar);
+
+            free(debug);
+            instance->debug = 0;
+
+            result = VM_RESULT_SUCCESS;
+            goto exit;
+        }
         if (!debug->is_stopped)
         {
             result = vm_result(VM_ERROR_MISUSE, 0);
@@ -733,11 +750,15 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         pthread_cond_destroy(&debug->stop_cvar);
 
         free(debug);
-
         instance->debug = 0;
         break;
 
     case VM_DEBUG_BREAK:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
         if (debug->is_stopped)
             break;
 
@@ -760,6 +781,11 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
 
     case VM_DEBUG_CONT:
     case VM_DEBUG_STEP:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
         if (!debug->is_stopped)
             break;
 
@@ -784,6 +810,11 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
 
     case VM_DEBUG_GETREGS:
     case VM_DEBUG_SETREGS:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
         if (!debug->is_stopped)
         {
             result = vm_result(VM_ERROR_MISUSE, 0);
@@ -802,6 +833,11 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
 
     case VM_DEBUG_SETBP:
     case VM_DEBUG_DELBP:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
         if (!debug->is_stopped || sizeof(vm_count_t) > *plength)
         {
             result = vm_result(VM_ERROR_MISUSE, 0);
