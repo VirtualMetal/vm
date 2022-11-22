@@ -16,7 +16,7 @@
 
 struct vm
 {
-    vm_config_t config;
+    vm_config_t config;                 /* must be first */
     WHV_PARTITION_HANDLE partition;
     SRWLOCK mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
@@ -27,9 +27,9 @@ struct vm
     unsigned
         is_terminated:1,                /* protected by thread_lock */
         is_debuggable:1;                /* immutable */
-    vm_count_t debug_enable_count;      /* protected by thread_lock */
-    struct vm_debug *debug;             /* protected by thread_lock */
     SRWLOCK vm_debug_lock;              /* vm_debug serialization lock */
+    struct vm_debug *debug;             /* protected by thread_lock */
+    vm_count_t debug_enable_count;      /* protected by thread_lock */
 };
 
 struct vm_mmap

@@ -18,7 +18,7 @@
 
 struct vm
 {
-    vm_config_t config;
+    vm_config_t config;                 /* must be first */
     int hv_fd;
     int vm_fd;
     int vcpu_run_size;
@@ -38,8 +38,8 @@ struct vm
         has_barrier:1,                  /* immutable */
         has_vm_debug_lock:1,            /* immutable */
         has_thread:1;                   /* protected by thread_lock */
-    struct vm_debug *debug;             /* protected by thread_lock */
     pthread_mutex_t vm_debug_lock;      /* vm_debug serialization lock */
+    struct vm_debug *debug;             /* protected by thread_lock */
     struct
     {
         pthread_t thread;
