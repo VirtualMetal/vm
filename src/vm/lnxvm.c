@@ -26,7 +26,9 @@ struct vm
     list_link_t mmap_list;              /* protected by mmap_lock */
     bmap_t slot_bmap[bmap_declcount(1024)];     /* ditto */
     pthread_mutex_t vm_start_lock;      /* vm_start/vm_wait serialization lock */
-    int is_started;                     /* protected by vm_start_lock */
+    unsigned
+        has_vm_start:1,                 /* protected by vm_start_lock */
+        has_vm_wait:1;                  /* protected by vm_start_lock */
     pthread_mutex_t thread_lock;
     pthread_barrier_t barrier;
     pthread_t thread;                   /* protected by thread_lock */
@@ -536,7 +538,7 @@ vm_result_t vm_start(vm_t *instance)
 
     pthread_mutex_lock(&instance->vm_start_lock);
 
-    if (instance->is_started)
+    if (instance->has_vm_start)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -557,7 +559,7 @@ vm_result_t vm_start(vm_t *instance)
     result = 0 == error ?
         VM_RESULT_SUCCESS : vm_result(VM_ERROR_VCPU, error);
     if (vm_result_check(result))
-        instance->is_started = instance->has_thread = 1;
+        instance->has_vm_start = instance->has_thread = 1;
 
     pthread_mutex_unlock(&instance->thread_lock);
 
@@ -574,11 +576,13 @@ vm_result_t vm_wait(vm_t *instance)
 
     pthread_mutex_lock(&instance->vm_start_lock);
 
-    if (!instance->is_started)
+    if (!instance->has_vm_start)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
+    if (instance->has_vm_wait)
+        goto getres;
 
     pthread_barrier_wait(&instance->barrier);
 
@@ -586,9 +590,11 @@ vm_result_t vm_wait(vm_t *instance)
 
     pthread_join(instance->thread, &retval);
     instance->has_thread = 0;
+    instance->has_vm_wait = 1;
 
     pthread_mutex_unlock(&instance->thread_lock);
 
+getres:
     result = atomic_load(&instance->thread_result);
     if (VM_ERROR_TERMINATED == vm_result_error(result))
         result = VM_RESULT_SUCCESS;

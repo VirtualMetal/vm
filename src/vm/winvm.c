@@ -21,7 +21,9 @@ struct vm
     SRWLOCK mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
     SRWLOCK vm_start_lock;              /* vm_start/vm_wait serialization lock */
-    BOOL is_started;                    /* protected by vm_start_lock */
+    unsigned
+        has_vm_start:1,                 /* protected by vm_start_lock */
+        has_vm_wait:1;                  /* protected by vm_start_lock */
     SRWLOCK thread_lock;
     HANDLE thread;                      /* protected by thread_lock */
     vm_count_t thread_count;
@@ -498,7 +500,7 @@ vm_result_t vm_start(vm_t *instance)
 
     AcquireSRWLockExclusive(&instance->vm_start_lock);
 
-    if (instance->is_started)
+    if (instance->has_vm_start)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -514,7 +516,7 @@ vm_result_t vm_start(vm_t *instance)
     result = 0 != instance->thread ?
         VM_RESULT_SUCCESS : vm_result(VM_ERROR_VCPU, GetLastError());
     if (vm_result_check(result))
-        instance->is_started = TRUE;
+        instance->has_vm_start = 1;
 
     ReleaseSRWLockExclusive(&instance->thread_lock);
 
@@ -530,11 +532,13 @@ vm_result_t vm_wait(vm_t *instance)
 
     AcquireSRWLockExclusive(&instance->vm_start_lock);
 
-    if (!instance->is_started)
+    if (!instance->has_vm_start)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
+    if (instance->has_vm_wait)
+        goto getres;
 
     /*
      * The functions vm_start and vm_wait may read instance->thread when inside the
@@ -552,9 +556,11 @@ vm_result_t vm_wait(vm_t *instance)
 
     CloseHandle(instance->thread);
     instance->thread = 0;
+    instance->has_vm_wait = 1;
 
     ReleaseSRWLockExclusive(&instance->thread_lock);
 
+getres:
     result = InterlockedCompareExchange64(&instance->thread_result, 0, 0);
     if (VM_ERROR_TERMINATED == vm_result_error(result))
         result = VM_RESULT_SUCCESS;
