@@ -31,6 +31,8 @@
 
 #if defined(_WIN64)
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 
 /*
@@ -289,6 +291,9 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -301,6 +306,7 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>

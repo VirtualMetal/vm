@@ -17,6 +17,7 @@
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\src\vm\gdb.c" />
     <ClCompile Include="..\..\src\vm\library.c" />
     <ClCompile Include="..\..\src\vm\result.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
@@ -87,7 +88,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhvplatform.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhvplatform.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
@@ -114,7 +115,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhvplatform.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhvplatform.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>

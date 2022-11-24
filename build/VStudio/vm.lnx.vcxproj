@@ -17,6 +17,7 @@
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\src\vm\gdb.c" />
     <ClCompile Include="..\..\src\vm\lnxvm.c" />
     <ClCompile Include="..\..\src\vm\program.c" />
     <ClCompile Include="..\..\src\vm\result.c" />

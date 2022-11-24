@@ -34,6 +34,8 @@ struct vm
     SRWLOCK vm_debug_lock;              /* vm_debug serialization lock */
     struct vm_debug *debug;             /* protected by thread_lock */
     vm_count_t debug_enable_count;      /* protected by thread_lock */
+    SRWLOCK debug_server_lock;
+    struct vm_debug_server *debug_server; /* protected by debug_server_lock */
 };
 
 struct vm_mmap
@@ -67,6 +69,19 @@ struct vm_debug
         stop_on_start:1;
 };
 
+struct vm_debug_server
+{
+    HANDLE thread;
+    SOCKET socket;
+    BOOL is_stopped;
+};
+
+struct vm_debug_socket
+{
+    struct vm_debug_server *debug_server;
+    SOCKET socket;
+};
+
 static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
     void *buffer, vm_count_t *plength);
 static DWORD WINAPI vm_thread(PVOID instance0);
@@ -78,6 +93,9 @@ static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static void vm_debug_log_mmap(vm_t *instance);
 static void vm_debug_log_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
+static DWORD WINAPI vm_debug_server_thread(PVOID instance0);
+static VOID NTAPI vm_debug_server_thread_apc(ULONG_PTR instance0);
+static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength);
 
 #if defined(_M_X64)
 /*
@@ -101,11 +119,27 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
     vm_result_t result;
     vm_t *instance = 0;
+    vm_count_t vcpu_count;
     WHV_PARTITION_PROPERTY property;
     WHV_CAPABILITY capability;
     HRESULT hresult;
 
     *pinstance = 0;
+
+    vcpu_count = config->vcpu_count;
+    if (0 == vcpu_count)
+    {
+        DWORD_PTR process_mask, system_mask;
+        if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, GetLastError());
+            goto exit;
+        }
+        for (vcpu_count = 0; 0 != process_mask; process_mask >>= 1)
+            vcpu_count += process_mask & 1;
+    }
+    if (0 == vcpu_count)
+        vcpu_count = 1;
 
     hresult = WHvGetCapability(
         WHvCapabilityCodeHypervisorPresent, &capability, sizeof capability, 0);
@@ -124,11 +158,13 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    instance->config.vcpu_count = vcpu_count;
     InitializeSRWLock(&instance->mmap_lock);
     list_init(&instance->mmap_list);
     InitializeSRWLock(&instance->vm_start_lock);
     InitializeSRWLock(&instance->thread_lock);
     InitializeSRWLock(&instance->vm_debug_lock);
+    InitializeSRWLock(&instance->debug_server_lock);
 
     hresult = WHvGetCapability(
         WHvCapabilityCodeExtendedVmExits, &capability, sizeof capability, 0);
@@ -138,20 +174,6 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
     instance->is_debuggable = !!capability.ExtendedVmExits.ExceptionExit;
-
-    if (0 == instance->config.vcpu_count)
-    {
-        DWORD_PTR process_mask, system_mask;
-        if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask))
-        {
-            result = vm_result(VM_ERROR_HYPERVISOR, GetLastError());
-            goto exit;
-        }
-        for (instance->config.vcpu_count = 0; 0 != process_mask; process_mask >>= 1)
-            instance->config.vcpu_count += process_mask & 1;
-    }
-    if (0 == instance->config.vcpu_count)
-        instance->config.vcpu_count = 1;
 
     hresult = WHvCreatePartition(&instance->partition);
     if (FAILED(hresult))
@@ -189,6 +211,9 @@ exit:
 
 vm_result_t vm_delete(vm_t *instance)
 {
+    if (0 != instance->debug_server)
+        vm_debug_server_stop(instance);
+
     while (!list_is_empty(&instance->mmap_list))
         vm_munmap(instance, (vm_mmap_t *)instance->mmap_list.next);
 
@@ -1561,4 +1586,234 @@ static void vm_debug_log_exit(vm_t *instance,
         (UINT32)exit_context->VpContext.Rflags,
         vm_result_error_string(result));
 #endif
+}
+
+vm_result_t vm_debug_server_start(vm_t *instance,
+    const char *hostname, const char *servname)
+{
+    vm_result_t result;
+    WSADATA wsa_data;
+    int wsa_res, gai_err;
+    BOOL has_wsa = FALSE;
+    struct addrinfo hint, *info = 0;
+    struct vm_debug_server *debug_server = 0;
+
+    AcquireSRWLockExclusive(&instance->debug_server_lock);
+
+    if (0 == servname || 0 != instance->debug_server)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    wsa_res = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+    if (0 != wsa_res)
+    {
+        result = vm_result(VM_ERROR_NETWORK, wsa_res);
+        goto exit;
+    }
+    has_wsa = TRUE;
+
+    memset(&hint, 0, sizeof hint);
+    hint.ai_flags = AI_PASSIVE;
+    hint.ai_family = AF_UNSPEC;
+    hint.ai_socktype = SOCK_STREAM;
+    hint.ai_protocol = IPPROTO_TCP;
+    gai_err = getaddrinfo(hostname, servname, &hint, &info);
+    if (0 != gai_err)
+    {
+        result = vm_result(VM_ERROR_NETWORK, gai_err);
+        goto exit;
+    }
+
+    debug_server = malloc(sizeof *debug_server);
+    if (0 == debug_server)
+    {
+        result = vm_result(VM_ERROR_RESOURCES, 0);
+        goto exit;
+    }
+
+    memset(debug_server, 0, sizeof *debug_server);
+    debug_server->socket = INVALID_SOCKET;
+
+    for (struct addrinfo *p = info; p; p = p->ai_next)
+    {
+        debug_server->socket = WSASocketW(p->ai_family, p->ai_socktype, p->ai_protocol,
+            0, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+        if (INVALID_SOCKET != debug_server->socket)
+        {
+            if (SOCKET_ERROR == bind(debug_server->socket, p->ai_addr, (int)p->ai_addrlen) ||
+                SOCKET_ERROR == listen(debug_server->socket, 1))
+            {
+                result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
+                goto exit;
+            }
+            int reuse = 1;
+            setsockopt(debug_server->socket, SOL_SOCKET, SO_REUSEADDR, (void *)&reuse, sizeof reuse);
+            break;
+        }
+    }
+    if (INVALID_SOCKET == debug_server->socket)
+    {
+        result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
+        goto exit;
+    }
+
+    debug_server->thread = CreateThread(0, 0, vm_debug_server_thread, instance, 0, 0);
+    if (0 == debug_server->thread)
+    {
+        result = vm_result(VM_ERROR_NETWORK, GetLastError());
+        goto exit;
+    }
+
+    instance->debug_server = debug_server;
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    if (0 != info)
+        freeaddrinfo(info);
+
+    if (!vm_result_check(result) && 0 != debug_server)
+    {
+        if (INVALID_SOCKET != debug_server->socket)
+            closesocket(debug_server->socket);
+        free(debug_server);
+    }
+
+    if (!vm_result_check(result) && has_wsa)
+        WSACleanup();
+
+    ReleaseSRWLockExclusive(&instance->debug_server_lock);
+
+    return result;
+}
+
+vm_result_t vm_debug_server_stop(vm_t *instance)
+{
+    vm_result_t result;
+    struct vm_debug_server *debug_server = 0;
+
+    AcquireSRWLockExclusive(&instance->debug_server_lock);
+
+    if (0 == (debug_server = instance->debug_server))
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    QueueUserAPC(vm_debug_server_thread_apc, debug_server->thread, (ULONG_PTR)instance);
+    WaitForSingleObject(debug_server->thread, INFINITE);
+
+    CloseHandle(debug_server->thread);
+    if (INVALID_SOCKET != debug_server->socket)
+        closesocket(debug_server->socket);
+    free(debug_server);
+
+    WSACleanup();
+
+    instance->debug_server = 0;
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    ReleaseSRWLockExclusive(&instance->debug_server_lock);
+
+    return result;
+}
+
+static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
+{
+    vm_result_t result;
+    vm_t *instance = instance0;
+    struct vm_debug_socket debug_socket_buf = { 0 }, *debug_socket = &debug_socket_buf;
+    struct vm_debug_server *debug_server;
+
+    /*
+     * It is safe to access instance->debug_server outside the debug_server_lock,
+     * because our lifetime is controlled by debug_server_start / debug_server_stop
+     * which do access instance->debug_server inside the debug_server_lock.
+     */
+    debug_server = instance->debug_server;
+    debug_socket->debug_server = debug_server;
+
+    while (!debug_server->is_stopped)
+    {
+        debug_socket->socket = accept(debug_server->socket, 0, 0);
+        if (INVALID_SOCKET == debug_socket->socket)
+        {
+            switch (WSAGetLastError())
+            {
+            case WSAECONNRESET:
+            case WSAENETDOWN:
+                /* retry on transient errors */
+                continue;
+            }
+            result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
+            goto exit;
+        }
+
+        int nodelay = 1;
+        setsockopt(debug_server->socket, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof nodelay);
+
+        if (!debug_server->is_stopped)
+            vm_gdb(instance, vm_debug_server_strm, debug_socket);
+
+        closesocket(debug_socket->socket);
+    }
+
+exit:
+    (void)result;
+    return 0;
+}
+
+static VOID NTAPI vm_debug_server_thread_apc(ULONG_PTR instance0)
+{
+    vm_t *instance = (vm_t *)instance0;
+
+    /*
+     * It is safe to access instance->debug_server outside the debug_server_lock,
+     * because our lifetime is controlled by debug_server_start / debug_server_stop
+     * which do access instance->debug_server inside the debug_server_lock.
+     */
+    instance->debug_server->is_stopped = TRUE;
+}
+
+static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength)
+{
+    vm_result_t result;
+    struct vm_debug_socket *debug_socket = (struct vm_debug_socket *)socket0;
+    struct vm_debug_server *debug_server = debug_socket->debug_server;
+    int length, bytes;
+
+    length = (int)*plength;
+    *plength = 0;
+
+    if (-1 == dir)
+        bytes = send(debug_socket->socket, buffer, length, 0);
+    else
+    if (+1 == dir)
+        bytes = recv(debug_socket->socket, buffer, length, 0);
+    else
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    if (debug_server->is_stopped)
+    {
+        result = vm_result(VM_ERROR_TERMINATED, 0);
+        goto exit;
+    }
+    if (-1 == bytes)
+    {
+        result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
+        goto exit;
+    }
+
+    *plength = bytes;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 }

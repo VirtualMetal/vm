@@ -28,11 +28,12 @@ typedef long long vm_result_t;
 #define VM_ERROR_MISUSE                 (-2LL<<48)  /* function misuse (e.g. invalid args) */
 #define VM_ERROR_RESOURCES              (-3LL<<48)  /* insufficient resources (e.g. out of memory) */
 #define VM_ERROR_FILE                   (-4LL<<48)  /* file error (e.g. cannot find file) */
-#define VM_ERROR_CONFIG                 (-5LL<<48)  /* configuration error */
-#define VM_ERROR_HYPERVISOR             (-6LL<<48)  /* hypervisor error (e.g. not present) */
-#define VM_ERROR_MEMORY                 (-7LL<<48)  /* memory error (e.g. invalid address) */
-#define VM_ERROR_VCPU                   (-8LL<<48)  /* virtual cpu error (e.g. cannot create) */
-#define VM_ERROR_TERMINATED             (-9LL<<48)  /* instance has terminated */
+#define VM_ERROR_NETWORK                (-5LL<<48)  /* network error (e.g. cannot connect) */
+#define VM_ERROR_CONFIG                 (-6LL<<48)  /* configuration error */
+#define VM_ERROR_HYPERVISOR             (-7LL<<48)  /* hypervisor error (e.g. not present) */
+#define VM_ERROR_MEMORY                 (-8LL<<48)  /* memory error (e.g. invalid address) */
+#define VM_ERROR_VCPU                   (-9LL<<48)  /* virtual cpu error (e.g. cannot create) */
+#define VM_ERROR_TERMINATED             (-10LL<<48) /* instance has terminated */
 
 #define vm_result(e, r)                 ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
 #define vm_result_error(R)              ((vm_result_t)(R) & VM_RESULT_ERROR_MASK)
@@ -319,6 +320,44 @@ struct vm_debug_events
  */
 vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
     void *buffer, vm_count_t *plength);
+
+/**
+ * Start a debug server.
+ *
+ * This function starts a debug server that listens on the specified network
+ * interface for GDB protocol commands.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param hostname
+ *     The host name or numeric IPv4 or IPv6 address.
+ * @param servname
+ *     The service name or port number.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_debug_server_start(vm_t *instance,
+    const char *hostname, const char *servname);
+
+/**
+ * Stop a debug server.
+ *
+ * This function stops the debug server if any.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_debug_server_stop(vm_t *instance);
+
+vm_result_t vm_gdb(vm_t *instance,
+    vm_result_t (*strm)(void *strmdata, int dir, void *buffer, vm_count_t *plength),
+    void *strmdata);
 
 /**
  * Parse text configuration.

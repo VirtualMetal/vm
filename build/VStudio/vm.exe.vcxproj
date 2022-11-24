@@ -17,6 +17,7 @@
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\src\vm\gdb.c" />
     <ClCompile Include="..\..\src\vm\program.c" />
     <ClCompile Include="..\..\src\vm\result.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
@@ -84,7 +85,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
-      <AdditionalDependencies>winhvplatform.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhvplatform.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(OutDir)$(TargetFileName).map</MapFileName>
@@ -108,7 +109,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
-      <AdditionalDependencies>winhvplatform.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhvplatform.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(OutDir)$(TargetFileName).map</MapFileName>

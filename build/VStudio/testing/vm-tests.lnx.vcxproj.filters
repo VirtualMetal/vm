@@ -65,5 +65,8 @@
     <ClCompile Include="..\..\..\tst\vm-tests\debug-test.c">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\src\vm\gdb.c">
+      <Filter>Source\vm</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
