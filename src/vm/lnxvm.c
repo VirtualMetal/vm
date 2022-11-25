@@ -90,14 +90,14 @@ struct vm_debug
 
 struct vm_debug_server
 {
-    pthread_t thread;
+    pthread_t thread;                   /* protected by debug_server_lock; unsafe outside */
     union
     {
-        int socket;
-        struct pollfd pollfd;
+        int socket;                     /* safe outside debug_server_lock in vm_debug_server_thread */
+        struct pollfd pollfd;           /* ditto */
     };
-    int is_stopped;
-    sigset_t sigset;
+    int is_stopped;                     /* ditto */
+    sigset_t sigset;                    /* ditto */
 };
 
 struct vm_debug_socket
@@ -124,6 +124,7 @@ static void vm_debug_log_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result);
 static void vm_debug_log_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
+static int vm_debug_server_listen(struct addrinfo *info, int ai_family);
 static void *vm_debug_server_thread(void *instance0);
 static void vm_debug_server_thread_signal(int signum);
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength);
@@ -1704,32 +1705,19 @@ vm_result_t vm_debug_server_start(vm_t *instance,
 
     memset(debug_server, 0, sizeof *debug_server);
     debug_server->socket = -1;
-    debug_server->pollfd.events = POLLIN;
     sigfillset(&debug_server->sigset);
     sigdelset(&debug_server->sigset, SIG_DBSRV_CANCEL);
 
-    for (struct addrinfo *p = info; p; p = p->ai_next)
-    {
-        debug_server->socket = socket(
-            p->ai_family, p->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, p->ai_protocol);
-        if (-1 != debug_server->socket)
-        {
-            if (-1 == bind(debug_server->socket, p->ai_addr, p->ai_addrlen) ||
-                -1 == listen(debug_server->socket, 1))
-            {
-                result = vm_result(VM_ERROR_NETWORK, errno);
-                goto exit;
-            }
-            int reuse = 1;
-            setsockopt(debug_server->socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof reuse);
-            break;
-        }
-    }
+    debug_server->socket = vm_debug_server_listen(info, AF_INET6);
+    if (-1 == debug_server->socket)
+        debug_server->socket = vm_debug_server_listen(info, AF_INET);
     if (-1 == debug_server->socket)
     {
         result = vm_result(VM_ERROR_NETWORK, errno);
         goto exit;
     }
+
+    instance->debug_server = debug_server;
 
     sigset_t newset, oldset;
     sigfillset(&newset);
@@ -1740,9 +1728,10 @@ vm_result_t vm_debug_server_start(vm_t *instance,
     result = 0 == error ?
         VM_RESULT_SUCCESS : vm_result(VM_ERROR_NETWORK, error);
     if (!vm_result_check(result))
+    {
+        instance->debug_server = 0;
         goto exit;
-
-    instance->debug_server = debug_server;
+    }
 
     result = VM_RESULT_SUCCESS;
 
@@ -1776,6 +1765,7 @@ vm_result_t vm_debug_server_stop(vm_t *instance)
         goto exit;
     }
 
+    atomic_store(&debug_server->is_stopped, 1);
     pthread_kill(debug_server->thread, SIG_DBSRV_CANCEL);
 
     pthread_join(debug_server->thread, &retval);
@@ -1793,7 +1783,44 @@ exit:
     return result;
 }
 
-static __thread vm_t *vm_debug_server_thread_instance;
+static int vm_debug_server_listen(struct addrinfo *info, int ai_family)
+{
+    int error = 0;
+    for (struct addrinfo *p = info; p; p = p->ai_next)
+        if (ai_family == p->ai_family)
+        {
+            int sock;
+            int v6only = 0; /* dual stack socket */
+            int reuse = 1;  /* reuse address */
+            if (-1 == (sock = socket(p->ai_family, p->ai_socktype |
+                    SOCK_NONBLOCK | SOCK_CLOEXEC, p->ai_protocol)) ||
+                (AF_INET6 == p->ai_family && -1 == setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
+                    &v6only, sizeof v6only)) ||
+                -1 == setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+                    &reuse, sizeof reuse) ||
+                -1 == bind(sock, p->ai_addr, p->ai_addrlen) ||
+                -1 == listen(sock, 1))
+            {
+                if (0 == error)
+                    error = errno;
+                if (-1 != sock)
+                    close(sock);
+                continue;
+            }
+            return sock;
+        }
+    errno = error;
+    return -1;
+}
+
+static inline
+int vm_debug_server_poll(struct vm_debug_server *debug_server, struct pollfd *pollfd, short events)
+{
+    pollfd->events = events;
+    ppoll(pollfd, 1, 0, &debug_server->sigset);
+    return !atomic_load(&debug_server->is_stopped);
+}
+
 static void *vm_debug_server_thread(void *instance0)
 {
     vm_result_t result;
@@ -1803,8 +1830,6 @@ static void *vm_debug_server_thread(void *instance0)
 
     /* thread has all signals blocked -- see vm_debug_server_start */
 
-    vm_debug_server_thread_instance = instance;
-
     /*
      * It is safe to access instance->debug_server outside the debug_server_lock,
      * because our lifetime is controlled by debug_server_start / debug_server_stop
@@ -1813,17 +1838,15 @@ static void *vm_debug_server_thread(void *instance0)
     debug_server = instance->debug_server;
     debug_socket->debug_server = debug_server;
 
-    while (!debug_server->is_stopped)
+    while (vm_debug_server_poll(debug_server, &debug_server->pollfd, POLLIN))
     {
-        if (-1 == ppoll(&debug_server->pollfd, 1, 0, &debug_server->sigset) && EINTR == errno)
-            continue;
         debug_socket->socket = accept4(debug_server->socket, 0, 0, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if (-1 == debug_socket->socket)
         {
             switch (errno)
             {
             case EINTR:
-            case EAGAIN:
+            case EWOULDBLOCK:
                 continue;
             case ENETDOWN:
             case EPROTO:
@@ -1833,6 +1856,7 @@ static void *vm_debug_server_thread(void *instance0)
             case EHOSTUNREACH:
             case EOPNOTSUPP:
             case ENETUNREACH:
+            case ECONNABORTED:
                 /* retry on transient errors as per accept4 man page */
                 continue;
             }
@@ -1841,39 +1865,20 @@ static void *vm_debug_server_thread(void *instance0)
         }
 
         int nodelay = 1;
-        setsockopt(debug_server->socket, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof nodelay);
-        
-        if (!debug_server->is_stopped)
-            vm_gdb(instance, vm_debug_server_strm, debug_socket);
+        setsockopt(debug_socket->socket, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof nodelay);
+
+        vm_gdb(instance, vm_debug_server_strm, debug_socket);
 
         close(debug_socket->socket);
     }
 
 exit:
-    vm_debug_server_thread_instance = 0;
-
     (void)result;
     return 0;
 }
 
 static void vm_debug_server_thread_signal(int signum)
 {
-    /*
-     * Pthread_getspecific and __thread are not async-signal safe.
-     * However in practice they are.
-     *
-     * See https://stackoverflow.com/a/24653340/568557
-     * See https://sourceware.org/legacy-ml/libc-alpha/2012-06/msg00372.html
-     */
-    vm_t *instance = vm_debug_server_thread_instance;
-
-    /*
-     * It is safe to access instance->debug_server outside the debug_server_lock,
-     * because our lifetime is controlled by debug_server_start / debug_server_stop
-     * which do access instance->debug_server inside the debug_server_lock.
-     */
-    if (0 != instance)
-        instance->debug_server->is_stopped = 1;
 }
 
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength)
@@ -1887,37 +1892,29 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
     length = (size_t)*plength;
     *plength = 0;
 
-restart:
-    if (-1 == dir)
-    {
-        debug_socket->pollfd.events = POLLOUT;
-        bytes = ppoll(&debug_socket->pollfd, 1, 0, &debug_server->sigset);
-        if (0 < bytes)
-            bytes = send(debug_socket->socket, buffer, length, MSG_NOSIGNAL);
-    }
-    else
-    if (+1 == dir)
-    {
-        debug_socket->pollfd.events = POLLIN;
-        bytes = ppoll(&debug_socket->pollfd, 1, 0, &debug_server->sigset);
-        if (0 < bytes)
-            bytes = recv(debug_socket->socket, buffer, length, 0);
-    }
-    else
+    if (+1 != dir && -1 != dir)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
-    if (debug_server->is_stopped)
+    for (;;)
     {
-        result = vm_result(VM_ERROR_TERMINATED, 0);
-        goto exit;
-    }
-    if (-1 == bytes)
-    {
-        if (EINTR == errno || EAGAIN == errno)
-            goto restart;
+        if (!vm_debug_server_poll(debug_server, &debug_socket->pollfd, +1 == dir ? POLLIN : POLLOUT))
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
+
+        if (+1 == dir)
+            bytes = recv(debug_socket->socket, buffer, length, 0);
+        else
+            bytes = send(debug_socket->socket, buffer, length, MSG_NOSIGNAL);
+        if (0 <= bytes)
+            break;
+
+        if (EWOULDBLOCK == errno)
+            continue;
         result = vm_result(VM_ERROR_NETWORK, errno);
         goto exit;
     }

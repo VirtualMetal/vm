@@ -71,15 +71,18 @@ struct vm_debug
 
 struct vm_debug_server
 {
-    HANDLE thread;
-    SOCKET socket;
-    BOOL is_stopped;
+    HANDLE thread;                      /* protected by debug_server_lock; unsafe outside */
+    SOCKET socket;                      /* safe outside debug_server_lock in vm_debug_server_thread */
+    HANDLE event;                       /* ditto */
+    HANDLE stop_event;                  /* ditto */
+    LONG is_stopped;                    /* ditto */
 };
 
 struct vm_debug_socket
 {
     struct vm_debug_server *debug_server;
     SOCKET socket;
+    HANDLE event;
 };
 
 static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
@@ -93,8 +96,8 @@ static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static void vm_debug_log_mmap(vm_t *instance);
 static void vm_debug_log_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
+static SOCKET vm_debug_server_listen(struct addrinfo *info, int ai_family);
 static DWORD WINAPI vm_debug_server_thread(PVOID instance0);
-static VOID NTAPI vm_debug_server_thread_apc(ULONG_PTR instance0);
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength);
 
 #if defined(_M_X64)
@@ -590,7 +593,7 @@ vm_result_t vm_wait(vm_t *instance)
     ReleaseSRWLockExclusive(&instance->thread_lock);
 
 getres:
-    result = InterlockedCompareExchange64(&instance->thread_result, 0, 0);
+    result = InterlockedCompareExchange64(&instance->thread_result, ~0LL, ~0LL);
     if (VM_ERROR_TERMINATED == vm_result_error(result))
         result = VM_RESULT_SUCCESS;
 
@@ -1635,38 +1638,33 @@ vm_result_t vm_debug_server_start(vm_t *instance,
 
     memset(debug_server, 0, sizeof *debug_server);
     debug_server->socket = INVALID_SOCKET;
-
-    for (struct addrinfo *p = info; p; p = p->ai_next)
+    debug_server->event = WSACreateEvent();
+    debug_server->stop_event = WSACreateEvent();
+    if (WSA_INVALID_EVENT == debug_server->event ||
+        WSA_INVALID_EVENT == debug_server->stop_event)
     {
-        debug_server->socket = WSASocketW(p->ai_family, p->ai_socktype, p->ai_protocol,
-            0, 0, WSA_FLAG_NO_HANDLE_INHERIT);
-        if (INVALID_SOCKET != debug_server->socket)
-        {
-            if (SOCKET_ERROR == bind(debug_server->socket, p->ai_addr, (int)p->ai_addrlen) ||
-                SOCKET_ERROR == listen(debug_server->socket, 1))
-            {
-                result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
-                goto exit;
-            }
-            int reuse = 1;
-            setsockopt(debug_server->socket, SOL_SOCKET, SO_REUSEADDR, (void *)&reuse, sizeof reuse);
-            break;
-        }
+        result = vm_result(VM_ERROR_RESOURCES, WSAGetLastError());
+        goto exit;
     }
+
+    debug_server->socket = vm_debug_server_listen(info, AF_INET6);
+    if (INVALID_SOCKET == debug_server->socket)
+        debug_server->socket = vm_debug_server_listen(info, AF_INET);
     if (INVALID_SOCKET == debug_server->socket)
     {
         result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
         goto exit;
     }
 
+    instance->debug_server = debug_server;
+
     debug_server->thread = CreateThread(0, 0, vm_debug_server_thread, instance, 0, 0);
     if (0 == debug_server->thread)
     {
+        instance->debug_server = 0;
         result = vm_result(VM_ERROR_NETWORK, GetLastError());
         goto exit;
     }
-
-    instance->debug_server = debug_server;
 
     result = VM_RESULT_SUCCESS;
 
@@ -1678,6 +1676,10 @@ exit:
     {
         if (INVALID_SOCKET != debug_server->socket)
             closesocket(debug_server->socket);
+        if (WSA_INVALID_EVENT != debug_server->event)
+            WSACloseEvent(debug_server->event);
+        if (WSA_INVALID_EVENT != debug_server->stop_event)
+            WSACloseEvent(debug_server->stop_event);
         free(debug_server);
     }
 
@@ -1702,12 +1704,17 @@ vm_result_t vm_debug_server_stop(vm_t *instance)
         goto exit;
     }
 
-    QueueUserAPC(vm_debug_server_thread_apc, debug_server->thread, (ULONG_PTR)instance);
+    InterlockedExchange(&debug_server->is_stopped, 1);
+    WSASetEvent(debug_server->stop_event);
     WaitForSingleObject(debug_server->thread, INFINITE);
 
     CloseHandle(debug_server->thread);
     if (INVALID_SOCKET != debug_server->socket)
         closesocket(debug_server->socket);
+    if (WSA_INVALID_EVENT != debug_server->event)
+        WSACloseEvent(debug_server->event);
+    if (WSA_INVALID_EVENT != debug_server->stop_event)
+        WSACloseEvent(debug_server->stop_event);
     free(debug_server);
 
     WSACleanup();
@@ -1720,6 +1727,48 @@ exit:
     ReleaseSRWLockExclusive(&instance->debug_server_lock);
 
     return result;
+}
+
+static SOCKET vm_debug_server_listen(struct addrinfo *info, int ai_family)
+{
+    int error = 0;
+    for (struct addrinfo *p = info; p; p = p->ai_next)
+        if (ai_family == p->ai_family)
+        {
+            SOCKET sock;
+            int v6only = 0; /* dual stack socket */
+            int reuse = 1;  /* reuse address */
+            if (INVALID_SOCKET == (sock = WSASocketW(p->ai_family, p->ai_socktype, p->ai_protocol,
+                    0, 0, WSA_FLAG_NO_HANDLE_INHERIT)) ||
+                (AF_INET6 == p->ai_family && SOCKET_ERROR == setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
+                    (void *)&v6only, sizeof v6only)) ||
+                SOCKET_ERROR == setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+                    (void *)&reuse, sizeof reuse) ||
+                SOCKET_ERROR == bind(sock, p->ai_addr, (int)p->ai_addrlen) ||
+                SOCKET_ERROR == listen(sock, 1))
+            {
+                if (0 == error)
+                    error = WSAGetLastError();
+                if (INVALID_SOCKET != sock)
+                    closesocket(sock);
+                continue;
+            }
+            return sock;
+        }
+    WSASetLastError(error);
+    return INVALID_SOCKET;
+}
+
+static inline
+BOOL vm_debug_server_poll(struct vm_debug_server *debug_server,
+    SOCKET socket, HANDLE event, long netevents)
+{
+    HANDLE events[2] = { debug_server->stop_event, event };
+    WSANETWORKEVENTS wsaevents;
+    WSAEventSelect(socket, event, netevents);
+    WSAWaitForMultipleEvents(2, events, FALSE, INFINITE, FALSE);
+    WSAEnumNetworkEvents(socket, event, &wsaevents);
+    return !InterlockedCompareExchange(&debug_server->is_stopped, ~0L, ~0L);
 }
 
 static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
@@ -1737,13 +1786,16 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
     debug_server = instance->debug_server;
     debug_socket->debug_server = debug_server;
 
-    while (!debug_server->is_stopped)
+    while (vm_debug_server_poll(debug_server,
+        debug_server->socket, debug_server->event, FD_ACCEPT))
     {
         debug_socket->socket = accept(debug_server->socket, 0, 0);
         if (INVALID_SOCKET == debug_socket->socket)
         {
             switch (WSAGetLastError())
             {
+            case WSAEWOULDBLOCK:
+                continue;
             case WSAECONNRESET:
             case WSAENETDOWN:
                 /* retry on transient errors */
@@ -1753,30 +1805,26 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
             goto exit;
         }
 
+        debug_socket->event = WSACreateEvent();
+        if (WSA_INVALID_EVENT == debug_socket->event)
+            goto loop_bottom;
+        WSAEventSelect(debug_socket->socket, debug_socket->event, 0);
+            /* cancel association of listening socket's event with our socket */
+
         int nodelay = 1;
-        setsockopt(debug_server->socket, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof nodelay);
+        setsockopt(debug_socket->socket, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof nodelay);
 
-        if (!debug_server->is_stopped)
-            vm_gdb(instance, vm_debug_server_strm, debug_socket);
+        vm_gdb(instance, vm_debug_server_strm, debug_socket);
 
+    loop_bottom:
         closesocket(debug_socket->socket);
+        if (WSA_INVALID_EVENT != debug_socket->event)
+            WSACloseEvent(debug_socket->event);
     }
 
 exit:
     (void)result;
     return 0;
-}
-
-static VOID NTAPI vm_debug_server_thread_apc(ULONG_PTR instance0)
-{
-    vm_t *instance = (vm_t *)instance0;
-
-    /*
-     * It is safe to access instance->debug_server outside the debug_server_lock,
-     * because our lifetime is controlled by debug_server_start / debug_server_stop
-     * which do access instance->debug_server inside the debug_server_lock.
-     */
-    instance->debug_server->is_stopped = TRUE;
 }
 
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength)
@@ -1789,24 +1837,30 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
     length = (int)*plength;
     *plength = 0;
 
-    if (-1 == dir)
-        bytes = send(debug_socket->socket, buffer, length, 0);
-    else
-    if (+1 == dir)
-        bytes = recv(debug_socket->socket, buffer, length, 0);
-    else
+    if (+1 != dir && -1 != dir)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
     }
 
-    if (debug_server->is_stopped)
+    for (;;)
     {
-        result = vm_result(VM_ERROR_TERMINATED, 0);
-        goto exit;
-    }
-    if (-1 == bytes)
-    {
+        if (!vm_debug_server_poll(debug_server,
+            debug_socket->socket, debug_socket->event, +1 == dir ? FD_READ : FD_WRITE))
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
+
+        if (+1 == dir)
+            bytes = recv(debug_socket->socket, buffer, length, 0);
+        else
+            bytes = send(debug_socket->socket, buffer, length, 0);
+        if (0 <= bytes)
+            break;
+
+        if (WSAEWOULDBLOCK == WSAGetLastError())
+            continue;
         result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
         goto exit;
     }

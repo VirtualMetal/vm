@@ -101,14 +101,31 @@ static void vm_debug_server_test(void)
     vm_t *instance;
 
     memset(&config, 0, sizeof config);
-    config.vcpu_count = 0;
+    config.vcpu_count = 1;
 
     result = vm_run(&config, tconfigv, &instance);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug_server_start(instance, 0, ":28022");
+    result = vm_debug_server_start(instance, 0, "30317");
     ASSERT(vm_result_check(result));
 
+#if !defined(_WIN64)
+#define SOCKET int
+#define INVALID_SOCKET (-1)
+#define closesocket(s) close(s)
+#endif
+    SOCKET s;
+    struct sockaddr_in addr =
+    {
+        .sin_family = AF_INET,
+        .sin_port = htons(30317),
+        .sin_addr.s_addr = htonl(0x7f000001),
+    };
+    int err;
+    s = socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT(INVALID_SOCKET != s);
+    err = connect(s, (void *)&addr, sizeof addr);
+    ASSERT(0 == err);
 #if defined(_WIN64)
     Sleep(300);
 #else
@@ -117,6 +134,8 @@ static void vm_debug_server_test(void)
     ts.tv_nsec = 300000000;
     nanosleep(&ts, 0);
 #endif
+    err = closesocket(s);
+    ASSERT(0 == err);
 
     result = vm_debug_server_stop(instance);
     ASSERT(vm_result_check(result));
@@ -134,6 +153,5 @@ static void vm_debug_server_test(void)
 void debug_tests(void)
 {
     TEST(vm_debug_test);
-    if (0)
-        TEST(vm_debug_server_test);
+    TEST(vm_debug_server_test);
 }
