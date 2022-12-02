@@ -387,6 +387,10 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
                 result = vm_gdb_sendf(state, "l");
         }
         else
+        if (0 == invariant_strncmp(packet + 1, "Offsets", sizeof "Offsets" - 1))
+            result = vm_gdb_sendf(state,
+                "Text=0;Data=0;Bss=0");
+        else
         if (0 == invariant_strncmp(packet + 1, "Supported", sizeof "Supported" - 1))
             result = vm_gdb_sendf(state,
                 "PacketSize=%d;QStartNoAckMode+;swbreak+;qXfer:features:read+",
