@@ -24,7 +24,9 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
     (L) <= cmi && cmi <= (U) && \
     (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p = cmip + 1))
     /* check macro */
-#define CHK(C)  if (C) ; else { result = vm_result(VM_ERROR_CONFIG, pp - tconfigv + 1); goto exit; }
+#define CHK(C)  do \
+    if (C) ; else { result = vm_result(VM_ERROR_CONFIG, pp - tconfigv + 1); goto exit; } \
+    while (0)
     /* page offset/length macros -- work for AMD64; also for ARM64 with a 4KB granule */
 #define PGO(P,L)(((P) & (0x0000ff8000000000ULL >> (((L) - 1) * 9))) >> (48 - (L) * 9) << 3)
 #define PGL(L)  ((0x8000000000ULL >> (((L) - 1) * 9)))
@@ -37,6 +39,8 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
     vm_t *instance = 0;
     vm_count_t guest_address, length, count, page_address;
     vm_mmap_t *map;
+    char debug_hostbuf[256], *debug_host = 0, *debug_port = 0;
+    vm_count_t debug_break = 0;
     int file;
     char mbuf[1024];
     char *cmip; unsigned cmi;
@@ -52,17 +56,40 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
         tconfigc++;
+        if (bmap_capacity(valid) < tconfigc)
+        {
+            result = vm_result(VM_ERROR_CONFIG, 0);
+            goto exit;
+        }
         if ('#' == *p || '\0' == *p)
             bmap_set(valid, (unsigned)(pp - tconfigv), 1);
-    }
-    if (bmap_capacity(valid) < tconfigc)
-    {
-        result = vm_result(VM_ERROR_CONFIG, 0);
-        goto exit;
     }
 
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
+        if (CMD("debug_host"))
+        {
+            int brk = '[' == *p ? (p++, ']') : ':';
+            for (char *q = debug_hostbuf, *endq = q + sizeof debug_hostbuf; endq > q && (*q = *p); p++, q++)
+                if (brk == *q)
+                {
+                    *q = '\0';
+                    break;
+                }
+            if (']' == brk)
+                CHK(']' == *p++);
+            CHK(':' == *p++);
+            debug_hostbuf[sizeof debug_hostbuf - 1] = '\0';
+            debug_host = *debug_hostbuf ? debug_hostbuf : 0;
+            debug_port = p;
+        }
+        else
+        if (CMD("debug_break"))
+        {
+            debug_break = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
+        else
         if (CMD("debug_log"))
         {
             config.debug_log = strtoullint(p, &p, +1) ? default_config->debug_log : 0;
@@ -201,9 +228,26 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
         goto exit;
     }
 
+    if (debug_break)
+    {
+        result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0);
+        if (!vm_result_check(result))
+            goto exit;
+        result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0);
+        if (!vm_result_check(result))
+            goto exit;
+    }
+
     result = vm_start(instance);
     if (!vm_result_check(result))
         goto exit;
+
+    if (0 != debug_port)
+    {
+        result = vm_debug_server_start(instance, debug_host, debug_port);
+        if (!vm_result_check(result))
+            goto exit;
+    }
 
     *pinstance = instance;
     result = VM_RESULT_SUCCESS;

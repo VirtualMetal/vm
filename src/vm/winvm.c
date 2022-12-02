@@ -83,6 +83,9 @@ struct vm_debug_socket
     struct vm_debug_server *debug_server;
     SOCKET socket;
     HANDLE event;
+    SRWLOCK send_oob_lock;
+    char send_oob_buffer[16];
+    vm_count_t send_oob_length;
 };
 
 static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
@@ -679,11 +682,6 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             result = vm_result(VM_ERROR_TERMINATED, 0);
             goto exit;
         }
-        if (0 != plength && sizeof(vm_debug_events_t) > *plength)
-        {
-            result = vm_result(VM_ERROR_MISUSE, 0);
-            goto exit;
-        }
 
         debug = malloc(sizeof *debug);
         if (0 == debug)
@@ -693,11 +691,6 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         }
 
         memset(debug, 0, sizeof *debug);
-        if (0 != plength)
-        {
-            debug->events = *(vm_debug_events_t *)buffer;
-            *plength = sizeof(vm_debug_events_t);
-        }
         InitializeConditionVariable(&debug->stop_cvar);
         InitializeConditionVariable(&debug->cont_cvar);
         InitializeConditionVariable(&debug->wait_cvar);
@@ -722,6 +715,8 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             goto exit;
         }
 
+        debug->events = (vm_debug_events_t){ 0 };
+
         for (vm_count_t index = debug->bp_count - 1; debug->bp_count > index; index--)
         {
             vm_count_t length = sizeof debug->bp_address[index];
@@ -733,6 +728,27 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
 
         free(debug);
         instance->debug = 0;
+        break;
+
+    case VM_DEBUG_SETEVENTS:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
+        if (!debug->is_stopped || (0 != plength && sizeof(vm_debug_events_t) > *plength))
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        if (0 != plength)
+        {
+            debug->events = *(vm_debug_events_t *)buffer;
+            *plength = sizeof(vm_debug_events_t);
+        }
+        else
+            debug->events = (vm_debug_events_t){ 0 };
         break;
 
     case VM_DEBUG_BREAK:
@@ -822,7 +838,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             vm_count_t bp_address = *(vm_count_t *)buffer;
             vm_count_t index;
 #if defined(_M_X64)
-            UINT32 bp_value, bp_instr = 0xcc/* INT3 instruction */;
+            UINT32 bp_value = 0, bp_instr = 0xcc/* INT3 instruction */;
             vm_count_t bp_length, bp_expected = 1;
 #endif
 
@@ -832,10 +848,17 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
                 if (debug->bp_address[index] == bp_address)
                     break;
 
+            /*
+             * If we are setting a breakpoint and we already have one at the specified address
+             * (debug->bp_count > index) then there is nothing to do and we can simply return.
+             *
+             * If we are deleting a breakpoint and we do not have one at the specified address
+             * (debug->bp_count <= index) then there is nothing to do and we can simply return.
+             */
+
             if (VM_DEBUG_SETBP == control && debug->bp_count <= index)
             {
-                if (sizeof debug->bp_address / sizeof debug->bp_address[0] >
-                    debug->bp_count)
+                if (sizeof debug->bp_address / sizeof debug->bp_address[0] <= debug->bp_count)
                 {
                     result = vm_result(VM_ERROR_MISUSE, 0);
                     goto exit;
@@ -857,7 +880,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
                 }
 
                 debug->bp_address[debug->bp_count] = bp_address;
-                debug->bp_value[debug->bp_count] = 0;
+                debug->bp_value[debug->bp_count] = bp_value;
                 debug->bp_count++;
             }
             else
@@ -884,6 +907,8 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
 
                 memmove(debug->bp_address + index, debug->bp_address + index + 1,
                     (debug->bp_count - index - 1) * sizeof debug->bp_address[0]);
+                memmove(debug->bp_value + index, debug->bp_value + index + 1,
+                    (debug->bp_count - index - 1) * sizeof debug->bp_value[0]);
                 debug->bp_count--;
             }
         }
@@ -1075,10 +1100,9 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index)
     if (instance->config.vcpu_count == debug->stop_count)
     {
         debug->is_stopped = 1;
+        if (0 != debug->events.handler)
+            debug->events.handler(debug->events.self, instance, VM_DEBUG_BREAK, ~0ULL/*vcpu_index*/);
         WakeAllConditionVariable(&debug->stop_cvar);
-
-        if (0 != debug->events.stop)
-            debug->events.stop(debug->events.self, instance, ~0ULL/*vcpu_index*/);
     }
 
     WAITCOND(
@@ -1090,6 +1114,8 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index)
     if (instance->config.vcpu_count == debug->cont_count)
     {
         debug->is_continued = 0;
+        if (0 != debug->events.handler)
+            debug->events.handler(debug->events.self, instance, VM_DEBUG_CONT, ~0ULL/*vcpu_index*/);
         WakeAllConditionVariable(&debug->cont_cvar);
     }
     else
@@ -1763,6 +1789,8 @@ static inline
 BOOL vm_debug_server_poll(struct vm_debug_server *debug_server,
     SOCKET socket, HANDLE event, long netevents)
 {
+    if (InterlockedCompareExchange(&debug_server->is_stopped, ~0L, ~0L))
+        return FALSE;
     HANDLE events[2] = { debug_server->stop_event, event };
     WSANETWORKEVENTS wsaevents;
     WSAEventSelect(socket, event, netevents);
@@ -1775,7 +1803,7 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
 {
     vm_result_t result;
     vm_t *instance = instance0;
-    struct vm_debug_socket debug_socket_buf = { 0 }, *debug_socket = &debug_socket_buf;
+    struct vm_debug_socket debug_socket_buf, *debug_socket = &debug_socket_buf;
     struct vm_debug_server *debug_server;
 
     /*
@@ -1784,11 +1812,13 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
      * which do access instance->debug_server inside the debug_server_lock.
      */
     debug_server = instance->debug_server;
-    debug_socket->debug_server = debug_server;
 
     while (vm_debug_server_poll(debug_server,
         debug_server->socket, debug_server->event, FD_ACCEPT))
     {
+        memset(debug_socket, 0, sizeof *debug_socket);
+        debug_socket->debug_server = debug_server;
+
         debug_socket->socket = accept(debug_server->socket, 0, 0);
         if (INVALID_SOCKET == debug_socket->socket)
         {
@@ -1805,6 +1835,11 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
             goto exit;
         }
 
+        result = VM_RESULT_SUCCESS;
+
+        InitializeSRWLock(&debug_socket->send_oob_lock);
+        debug_socket->send_oob_length = 0;
+
         debug_socket->event = WSACreateEvent();
         if (WSA_INVALID_EVENT == debug_socket->event)
             goto loop_bottom;
@@ -1814,12 +1849,15 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
         int nodelay = 1;
         setsockopt(debug_socket->socket, IPPROTO_TCP, TCP_NODELAY, (void *)&nodelay, sizeof nodelay);
 
-        vm_gdb(instance, vm_debug_server_strm, debug_socket);
+        result = vm_gdb(instance, vm_debug_server_strm, debug_socket);
 
     loop_bottom:
         closesocket(debug_socket->socket);
         if (WSA_INVALID_EVENT != debug_socket->event)
             WSACloseEvent(debug_socket->event);
+
+        if (VM_ERROR_TERMINATED == vm_result_error(result))
+            break;
     }
 
 exit:
@@ -1832,10 +1870,28 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
     vm_result_t result;
     struct vm_debug_socket *debug_socket = (struct vm_debug_socket *)socket0;
     struct vm_debug_server *debug_server = debug_socket->debug_server;
-    int length, bytes;
+    int length, tbytes, bytes;
 
     length = (int)*plength;
+    tbytes = 0;
     *plength = 0;
+
+    if (-2 == dir)
+    {
+        if (sizeof debug_socket->send_oob_buffer < length)
+            return vm_result(VM_ERROR_MISUSE, 0);
+
+        AcquireSRWLockExclusive(&debug_socket->send_oob_lock);
+        memcpy(debug_socket->send_oob_buffer, buffer,
+            debug_socket->send_oob_length = length);
+        ReleaseSRWLockExclusive(&debug_socket->send_oob_lock);
+
+        /* signal the stop event without setting is_stopped */
+        WSASetEvent(debug_server->stop_event);
+
+        *plength = length;
+        return VM_RESULT_SUCCESS;
+    }
 
     if (+1 != dir && -1 != dir)
     {
@@ -1845,27 +1901,56 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
 
     for (;;)
     {
-        if (!vm_debug_server_poll(debug_server,
-            debug_socket->socket, debug_socket->event, +1 == dir ? FD_READ : FD_WRITE))
+        if (+1 == dir)
         {
-            result = vm_result(VM_ERROR_TERMINATED, 0);
-            goto exit;
+            char send_oob_buffer[sizeof debug_socket->send_oob_buffer];
+            vm_count_t send_oob_length;
+            AcquireSRWLockExclusive(&debug_socket->send_oob_lock);
+            memcpy(send_oob_buffer, debug_socket->send_oob_buffer,
+                send_oob_length = debug_socket->send_oob_length);
+            debug_socket->send_oob_length = 0;
+            ReleaseSRWLockExclusive(&debug_socket->send_oob_lock);
+            if (0 < send_oob_length)
+                vm_debug_server_strm(socket0, -1, send_oob_buffer, &send_oob_length);
+
+            bytes = recv(debug_socket->socket, buffer, length, 0);
+            if (0 <= bytes)
+            {
+                tbytes += bytes;
+                break;
+            }
+        }
+        else
+        {
+            bytes = send(debug_socket->socket, buffer, length, 0);
+            if (0 <= bytes)
+            {
+                tbytes += bytes;
+                buffer = (char *)buffer + bytes;
+                length -= (size_t)bytes;
+                if (0 < length)
+                    continue;
+                else
+                    break;
+            }
         }
 
-        if (+1 == dir)
-            bytes = recv(debug_socket->socket, buffer, length, 0);
-        else
-            bytes = send(debug_socket->socket, buffer, length, 0);
-        if (0 <= bytes)
-            break;
-
         if (WSAEWOULDBLOCK == WSAGetLastError())
+        {
+            if (!vm_debug_server_poll(debug_server,
+                debug_socket->socket, debug_socket->event, +1 == dir ? FD_READ : FD_WRITE))
+            {
+                result = vm_result(VM_ERROR_TERMINATED, 0);
+                goto exit;
+            }
             continue;
+        }
+
         result = vm_result(VM_ERROR_NETWORK, WSAGetLastError());
         goto exit;
     }
 
-    *plength = bytes;
+    *plength = tbytes;
     result = VM_RESULT_SUCCESS;
 
 exit:

@@ -278,6 +278,7 @@ vm_result_t vm_terminate(vm_t *instance);
 
 #define VM_DEBUG_ATTACH                 ((vm_count_t)'A')   /**< attach debugger to VM instance */
 #define VM_DEBUG_DETACH                 ((vm_count_t)'D')   /**< detach debugger from VM instance */
+#define VM_DEBUG_SETEVENTS              ((vm_count_t)'E')   /**< set debug events handler */
 #define VM_DEBUG_BREAK                  ((vm_count_t)0x3)   /**< break into debugger */
 #define VM_DEBUG_WAIT                   ((vm_count_t)'w')   /**< wait until VM instance stops */
 #define VM_DEBUG_CONT                   ((vm_count_t)'c')   /**< continue the VM instance */
@@ -291,7 +292,7 @@ typedef struct vm_debug_events vm_debug_events_t;
 struct vm_debug_events
 {
     void *self;
-    void (*stop)(void *self, vm_t *instance, vm_count_t reserved);
+    void (*handler)(void *self, vm_t *instance, vm_count_t control, vm_count_t reserved);
 };
 
 /**
@@ -310,11 +311,11 @@ struct vm_debug_events
  *     *REGS codes.
  * @param buffer
  *     The buffer to read/write into. This parameter is used only for the
- *     ATTACH, *REGS, and *BP codes.
+ *     SETEVENTS, *REGS, and *BP codes.
  * @param plength
  *     On input it contains the length of the buffer. On output it receives
  *     the number of bytes read/written. This parameter is used only for the
- *     ATTACH, *REGS, and *BP codes.
+ *     SETEVENTS, *REGS, and *BP codes.
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
