@@ -541,7 +541,8 @@ vm_result_t vm_start(vm_t *instance)
         goto exit;
     }
 
-    if (instance->config.debug_log)
+    if (instance->config.logf &&
+        0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR))
         vm_debug_log_mmap(instance);
 
     AcquireSRWLockExclusive(&instance->thread_lock);
@@ -978,7 +979,8 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     if (!vm_result_check(result))
         goto exit;
 
-    has_debug_log = !!instance->config.debug_log;
+    has_debug_log = !!instance->config.logf &&
+        0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
 
     for (;;)
     {
@@ -1532,7 +1534,7 @@ static void vm_debug_log_mmap(vm_t *instance)
     list_traverse(link, next, &instance->mmap_list)
     {
         vm_mmap_t *map = (vm_mmap_t *)link;
-        instance->config.debug_log("mmap=%p,%p",
+        instance->config.logf("mmap=%p,%p",
             map->guest_address,
             map->head_length + map->tail_length);
     }
@@ -1607,7 +1609,7 @@ static void vm_debug_log_exit(vm_t *instance,
     }
 
 #if defined(_M_X64)
-    instance->config.debug_log(
+    instance->config.logf(
         "[%u] %s(cs:rip=%04x:%p, efl=%08x) = %s",
         (unsigned)vcpu_index,
         exit_reason_str,

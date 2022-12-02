@@ -49,14 +49,18 @@ typedef unsigned long long vm_count_t;
 
 struct vm_config
 {
-    void (*debug_log)(const char *format, ...);
+    void (*logf)(const char *format, ...);
+    vm_count_t log_flags;
     vm_count_t vcpu_count;              /* number of virtual cpu's */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
     vm_count_t vcpu_table;              /* virtual cpu data table address */
     vm_count_t page_table;              /* page table address */
 
-    vm_count_t reserved[27];
+    vm_count_t reserved[26];
 };
+
+#define VM_CONFIG_LOG_HYPERVISOR        1
+#define VM_CONFIG_LOG_DEBUGSERVER       0x80000000
 
 /**
  * Run a VM instance with the specified text configuration.

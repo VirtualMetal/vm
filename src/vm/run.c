@@ -48,7 +48,6 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
     *pinstance = 0;
 
     config = *default_config;
-    config.debug_log = 0;
 
     memset(valid, 0, sizeof valid);
 
@@ -92,7 +91,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
         else
         if (CMD("debug_log"))
         {
-            config.debug_log = strtoullint(p, &p, +1) ? default_config->debug_log : 0;
+            config.log_flags = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
         else

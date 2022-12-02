@@ -66,7 +66,7 @@ int main(int argc, char **argv)
     vm_t *instance = 0;
 
     memset(&default_config, 0, sizeof default_config);
-    default_config.debug_log = warn;
+    default_config.logf = warn;
     default_config.vcpu_count = 1;
 
     tconfigc = argc - 1;

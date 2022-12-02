@@ -603,7 +603,8 @@ vm_result_t vm_start(vm_t *instance)
         goto exit;
     }
 
-    if (instance->config.debug_log)
+    if (instance->config.logf &&
+        0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR))
         vm_debug_log_mmap(instance);
 
     pthread_mutex_lock(&instance->thread_lock);
@@ -1089,7 +1090,8 @@ static void *vm_thread(void *instance0)
     if (!vm_result_check(result))
         goto exit;
 
-    has_debug_log = !!instance->config.debug_log;
+    has_debug_log = !!instance->config.logf &&
+        0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
 
     /* we are now able to accept cancellation signals */
     pthread_sigmask(SIG_SETMASK, &newset, 0);
@@ -1638,7 +1640,7 @@ static void vm_debug_log_mmap(vm_t *instance)
     list_traverse(link, next, &instance->mmap_list)
     {
         vm_mmap_t *map = (vm_mmap_t *)link;
-        instance->config.debug_log("mmap=%p,%p",
+        instance->config.logf("mmap=%p,%p",
             map->guest_address,
             map->region_length);
     }
@@ -1649,7 +1651,7 @@ static void vm_debug_log_mmap(vm_t *instance)
 static void vm_debug_log_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result)
 {
-    instance->config.debug_log("[%u] SIG_VCPU_CANCEL() = %s",
+    instance->config.logf("[%u] SIG_VCPU_CANCEL() = %s",
         vcpu_index,
         vm_result_error_string(result));
 }
@@ -1660,35 +1662,35 @@ static void vm_debug_log_exit(vm_t *instance,
     switch (vcpu_run->exit_reason)
     {
     case KVM_EXIT_UNKNOWN:
-        instance->config.debug_log("[%u] UNKNOWN(hardware_exit_reason=%llu) = %s",
+        instance->config.logf("[%u] UNKNOWN(hardware_exit_reason=%llu) = %s",
             vcpu_index,
             (unsigned long long)vcpu_run->hw.hardware_exit_reason,
             vm_result_error_string(result));
         break;
     case KVM_EXIT_HLT:
-        instance->config.debug_log("[%u] HLT() = %s",
+        instance->config.logf("[%u] HLT() = %s",
             vcpu_index,
             vm_result_error_string(result));
         break;
     case KVM_EXIT_SHUTDOWN:
-        instance->config.debug_log("[%u] SHUTDOWN() = %s",
+        instance->config.logf("[%u] SHUTDOWN() = %s",
             vcpu_index,
             vm_result_error_string(result));
         break;
     case KVM_EXIT_FAIL_ENTRY:
-        instance->config.debug_log("[%u] FAIL_ENTRY(hardware_entry_failure_reason=0x%lx) = %s",
+        instance->config.logf("[%u] FAIL_ENTRY(hardware_entry_failure_reason=0x%lx) = %s",
             vcpu_index,
             (unsigned long long)vcpu_run->fail_entry.hardware_entry_failure_reason,
             vm_result_error_string(result));
         break;
     case KVM_EXIT_INTERNAL_ERROR:
-        instance->config.debug_log("[%u] INTERNAL_ERROR(suberror=%u) = %s",
+        instance->config.logf("[%u] INTERNAL_ERROR(suberror=%u) = %s",
             vcpu_index,
             (unsigned)vcpu_run->internal.suberror,
             vm_result_error_string(result));
         break;
     default:
-        instance->config.debug_log("[%u] EXIT=%x() = %s",
+        instance->config.logf("[%u] EXIT=%x() = %s",
             vcpu_index,
             vcpu_run->exit_reason,
             vm_result_error_string(result));
