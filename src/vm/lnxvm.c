@@ -102,6 +102,7 @@ struct vm_debug_server
 
 struct vm_debug_socket
 {
+    vm_t *instance;
     struct vm_debug_server *debug_server;
     union
     {
@@ -1667,6 +1668,11 @@ static void vm_debug_log_exit(vm_t *instance,
             (unsigned long long)vcpu_run->hw.hardware_exit_reason,
             vm_result_error_string(result));
         break;
+    case KVM_EXIT_DEBUG:
+        instance->config.logf("[%u] DEBUG() = %s",
+            vcpu_index,
+            vm_result_error_string(result));
+        break;
     case KVM_EXIT_HLT:
         instance->config.logf("[%u] HLT() = %s",
             vcpu_index,
@@ -1872,6 +1878,7 @@ static void *vm_debug_server_thread(void *instance0)
     while (vm_debug_server_poll(debug_server, &debug_server->pollfd, POLLIN))
     {
         memset(debug_socket, 0, sizeof *debug_socket);
+        debug_socket->instance = instance;
         debug_socket->debug_server = debug_server;
 
         debug_socket->socket = accept4(debug_server->socket, 0, 0, SOCK_NONBLOCK | SOCK_CLOEXEC);
@@ -1981,6 +1988,9 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
             bytes = recv(debug_socket->socket, buffer, length, 0);
             if (0 <= bytes)
             {
+                if (debug_socket->instance->config.logf &&
+                    0 != (debug_socket->instance->config.log_flags & VM_CONFIG_LOG_DEBUGSERVER))
+                    debug_socket->instance->config.logf("RECV: %.*s", 512 > bytes ? (int)bytes : 512, buffer);
                 tbytes += bytes;
                 break;
             }
@@ -1990,6 +2000,9 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
             bytes = send(debug_socket->socket, buffer, length, MSG_NOSIGNAL);
             if (0 <= bytes)
             {
+                if (debug_socket->instance->config.logf &&
+                    0 != (debug_socket->instance->config.log_flags & VM_CONFIG_LOG_DEBUGSERVER))
+                    debug_socket->instance->config.logf("SEND: %.*s", 512 > bytes ? (int)bytes : 512, buffer);
                 tbytes += bytes;
                 buffer = (char *)buffer + bytes;
                 length -= (size_t)bytes;

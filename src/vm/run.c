@@ -66,6 +66,12 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
 
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
+        if (CMD("log_flags"))
+        {
+            config.log_flags = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
+        else
         if (CMD("debug_host"))
         {
             int brk = '[' == *p ? (p++, ']') : ':';
@@ -86,12 +92,6 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
         if (CMD("debug_break"))
         {
             debug_break = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
-        }
-        else
-        if (CMD("debug_log"))
-        {
-            config.log_flags = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
         else

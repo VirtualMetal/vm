@@ -80,6 +80,7 @@ struct vm_debug_server
 
 struct vm_debug_socket
 {
+    vm_t *instance;
     struct vm_debug_server *debug_server;
     SOCKET socket;
     HANDLE event;
@@ -1819,6 +1820,7 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0)
         debug_server->socket, debug_server->event, FD_ACCEPT))
     {
         memset(debug_socket, 0, sizeof *debug_socket);
+        debug_socket->instance = instance;
         debug_socket->debug_server = debug_server;
 
         debug_socket->socket = accept(debug_server->socket, 0, 0);
@@ -1918,6 +1920,13 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
             bytes = recv(debug_socket->socket, buffer, length, 0);
             if (0 <= bytes)
             {
+                if (debug_socket->instance->config.logf &&
+                    0 != (debug_socket->instance->config.log_flags & VM_CONFIG_LOG_DEBUGSERVER))
+                {
+                    char buf[16];
+                    wsprintfA(buf, "RECV: %%.%ds", 512 > bytes ? (int)bytes : 512);
+                    debug_socket->instance->config.logf(buf, buffer);
+                }
                 tbytes += bytes;
                 break;
             }
@@ -1927,6 +1936,13 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
             bytes = send(debug_socket->socket, buffer, length, 0);
             if (0 <= bytes)
             {
+                if (debug_socket->instance->config.logf &&
+                    0 != (debug_socket->instance->config.log_flags & VM_CONFIG_LOG_DEBUGSERVER))
+                {
+                    char buf[16];
+                    wsprintfA(buf, "SEND: %%.%ds", 512 > bytes ? (int)bytes : 512);
+                    debug_socket->instance->config.logf(buf, buffer);
+                }
                 tbytes += bytes;
                 buffer = (char *)buffer + bytes;
                 length -= (size_t)bytes;
