@@ -148,9 +148,9 @@ static void vm_debug_server_test(void)
     buffer[PacketSize - 1] = '$';
     bytes = send(s, buffer, PacketSize, 0);
     ASSERT(PacketSize == bytes);
-    memcpy(buffer, "vMustReplyEmpty#3a", sizeof "$vMustReplyEmpty#3a" - 1);
-    bytes = send(s, buffer, sizeof "$vMustReplyEmpty#3a" - 1, 0);
-    ASSERT(sizeof "$vMustReplyEmpty#3a" - 1 == bytes);
+    memcpy(buffer, "vMustReplyEmpty#3a", sizeof "vMustReplyEmpty#3a" - 1);
+    bytes = send(s, buffer, sizeof "vMustReplyEmpty#3a" - 1, 0);
+    ASSERT(sizeof "vMustReplyEmpty#3a" - 1 == bytes);
     bytes = recv(s, buffer, PacketSize, 0);
     ASSERT(1 <= bytes && '+' == buffer[0]);
     free(buffer);
