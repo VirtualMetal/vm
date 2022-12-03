@@ -317,6 +317,28 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #include <sys/types.h>
 #include <unistd.h>
 
+/*
+ * miscellaneous
+ */
+
+/* sprintf max buffer size is 1024 for compatibility with wsprintfA */
+#define sprintf(...)                    sprintf_1024(__VA_ARGS__)
+#define vsprintf(...)                   vsprintf_1024(__VA_ARGS__)
+static inline
+int sprintf_1024(char *buf, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int res = vsnprintf(buf, 1024, fmt, ap);
+    va_end(ap);
+    return res;
+}
+static inline
+int vsprintf_1024(char *buf, const char *fmt, va_list ap)
+{
+    return vsnprintf(buf, 1024, fmt, ap);
+}
+
 #define EXEMAIN struct exemain__unused__ {}
 #define LIBMAIN struct libmain__unused__ {}
 
