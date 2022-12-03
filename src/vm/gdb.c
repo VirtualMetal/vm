@@ -160,7 +160,8 @@ static vm_result_t vm_gdb_loop(struct vm_gdb_state *state)
                 /* if there is no packet or packet is too large, discard and refill */
                 goto refill;
             memmove(state->ibuf, packp, (size_t)(ibufp - packp));
-            ibufp -= ibufp - packp;
+            p -= packp - state->ibuf;
+            ibufp -= packp - state->ibuf;
             length = (vm_count_t)(state->ibuf + PACKET_SIZE - ibufp);
         }
         result = state->strm(state->strmdata, +1, ibufp, &length);

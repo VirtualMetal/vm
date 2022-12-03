@@ -126,6 +126,31 @@ static void vm_debug_server_test(void)
     ASSERT(INVALID_SOCKET != s);
     err = connect(s, (void *)&addr, sizeof addr);
     ASSERT(0 == err);
+
+    char *buffer;
+#if defined(_WIN64)
+    int PacketSize = 16 * 1024;
+    int bytes;
+#else
+    size_t PacketSize = 16 * 1024;
+    ssize_t bytes;
+#endif
+    buffer = malloc(PacketSize);
+    ASSERT(0 != buffer);
+    memset(buffer, 0, PacketSize);
+    bytes = send(s, buffer, PacketSize, 0);
+    ASSERT(PacketSize == bytes);
+    memset(buffer, 0, PacketSize);
+    buffer[PacketSize - 1] = '$';
+    bytes = send(s, buffer, PacketSize, 0);
+    ASSERT(PacketSize == bytes);
+    memcpy(buffer, "vMustReplyEmpty#3a", sizeof "$vMustReplyEmpty#3a" - 1);
+    bytes = send(s, buffer, sizeof "$vMustReplyEmpty#3a" - 1, 0);
+    ASSERT(sizeof "$vMustReplyEmpty#3a" - 1 == bytes);
+    bytes = recv(s, buffer, PacketSize, 0);
+    ASSERT(1 <= bytes && '+' == buffer[0]);
+    free(buffer);
+
 #if defined(_WIN64)
     Sleep(300);
 #else
@@ -134,6 +159,7 @@ static void vm_debug_server_test(void)
     ts.tv_nsec = 300000000;
     nanosleep(&ts, 0);
 #endif
+
     err = closesocket(s);
     ASSERT(0 == err);
 

@@ -823,7 +823,7 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             result = vm_result(VM_ERROR_TERMINATED, 0);
             goto exit;
         }
-        if (!debug->is_stopped || (0 != plength && sizeof(vm_debug_events_t) > *plength))
+        if (0 != plength && sizeof(vm_debug_events_t) > *plength)
         {
             result = vm_result(VM_ERROR_MISUSE, 0);
             goto exit;
