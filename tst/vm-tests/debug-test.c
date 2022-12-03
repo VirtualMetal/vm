@@ -141,6 +141,10 @@ static void vm_debug_server_test(void)
     bytes = send(s, buffer, PacketSize, 0);
     ASSERT(PacketSize == bytes);
     memset(buffer, 0, PacketSize);
+    buffer[0] = '$';
+    bytes = send(s, buffer, PacketSize, 0);
+    ASSERT(PacketSize == bytes);
+    memset(buffer, 0, PacketSize);
     buffer[PacketSize - 1] = '$';
     bytes = send(s, buffer, PacketSize, 0);
     ASSERT(PacketSize == bytes);
