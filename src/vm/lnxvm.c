@@ -1769,6 +1769,9 @@ vm_result_t vm_debug_server_start(vm_t *instance,
         goto exit;
     }
 
+    if (instance->config.logf)
+        instance->config.logf("debug server listening on :%s", servname);
+
     result = VM_RESULT_SUCCESS;
 
 exit:
