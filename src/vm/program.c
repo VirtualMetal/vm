@@ -61,7 +61,7 @@ int main(int argc, char **argv)
     vm_result_t result;
     vm_result_t reason;
     vm_config_t default_config;
-    int tconfigc;
+    int argi, tconfigc;
     char **tconfigv;
     vm_t *instance = 0;
 
@@ -69,8 +69,42 @@ int main(int argc, char **argv)
     default_config.logf = warn;
     default_config.vcpu_count = 1;
 
-    tconfigc = argc - 1;
-    tconfigv = argv + 1;
+    for (argi = 1; argc > argi; argi++)
+    {
+        const char *a = argv[argi];
+        if ('-' != a[0])
+            break;
+        else
+        if (0 == invariant_strcmp("--", a))
+        {
+            argi++;
+            break;
+        }
+        else
+        if (0 == invariant_strcmp("-C", a) && argc > argi + 1)
+        {
+            argi++;
+            if (-1 == chdir(argv[argi]))
+            {
+                result = vm_result(VM_ERROR_FILE, errno);
+                goto exit;
+            }
+        }
+        else
+        {
+            result = vm_result(VM_ERROR_CONFIG, 0);
+            goto exit;
+        }
+    }
+
+    tconfigc = argc - argi;
+    tconfigv = argv + argi;
+    if (0 == tconfigc)
+    {
+        result = vm_result(VM_ERROR_CONFIG, 0);
+        goto exit;
+    }
+
     result = vm_parse_text_config(&tconfigc, &tconfigv);
     if (!vm_result_check(result))
         goto exit;
@@ -93,6 +127,7 @@ exit:
         return 0;
     else if (VM_ERROR_CONFIG == vm_result_error(result))
     {
+        warn("syntax: [-C <work-dir>] [<name>=<value> | <conf-file>]...");
         reason = vm_result_reason(result);
         if (1 <= reason && reason <= (unsigned)tconfigc)
             warn("config error: %s", tconfigv[reason - 1]);

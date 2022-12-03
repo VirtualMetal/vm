@@ -137,6 +137,12 @@ struct stat
 };
 
 static inline
+int chdir(const char *path)
+{
+    return SetCurrentDirectoryA(path) ? 0 : -1;
+}
+
+static inline
 int open(const char *path, int oflag, ...)
 {
     static DWORD da[] = { GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE, 0 };
