@@ -15,5 +15,6 @@ EXPORTS
     vm_debug
     vm_debug_server_start
     vm_debug_server_stop
+    vm_gdb
     vm_parse_text_config
     vm_free_text_config

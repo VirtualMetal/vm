@@ -62,7 +62,7 @@ vm_result_t vm_gdb(vm_t *instance,
     buffer = malloc(PACKET_SIZE * 2 + MBUF_SIZE);
     if (0 == buffer)
     {
-        result = vm_result(VM_ERROR_MEMORY, 0);
+        result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
