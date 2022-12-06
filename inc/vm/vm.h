@@ -111,6 +111,9 @@ vm_result_t vm_delete(vm_t *instance);
  *     The file to map. If -1 then the host memory is not file backed.
  *     Otherwise the host memory is file backed; in this case it is an error
  *     to specify a non-0 host_address.
+ * @param file_offset
+ *     The offset within the file to map. This parameter should be 0 if the
+ *     file parameter is -1.
  * @param guest_address
  *     The guest address of the mapping.
  * @param length
@@ -121,7 +124,8 @@ vm_result_t vm_delete(vm_t *instance);
  *     VM_RESULT_SUCCESS or error code.
  */
 vm_result_t vm_mmap(vm_t *instance,
-    void *host_address, int file, vm_count_t guest_address, vm_count_t length,
+    void *host_address, int file, vm_count_t file_offset,
+    vm_count_t guest_address, vm_count_t length,
     vm_mmap_t **pmap);
 
 /**

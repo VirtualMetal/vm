@@ -46,7 +46,7 @@ static void vm_mmap_test(void)
     ASSERT(vm_result_check(result));
     ASSERT(0 != instance);
 
-    result = vm_mmap(instance, 0, -1, 0, 1024 * 1024, &map);
+    result = vm_mmap(instance, 0, -1, 0, 0, 1024 * 1024, &map);
     ASSERT(vm_result_check(result));
     ASSERT(0 != map);
 
@@ -105,7 +105,7 @@ static void vm_mmap_file_test(void)
 
     file = open(fileA, O_RDONLY);
     ASSERT(-1 != file);
-    result = vm_mmap(instance, 0, file, 0, 1024 * 1024, &map);
+    result = vm_mmap(instance, 0, file, 0, 0, 1024 * 1024, &map);
     ASSERT(vm_result_check(result));
     ASSERT(0 != map);
     close(file);
@@ -164,6 +164,71 @@ static void vm_mmap_file_test(void)
 
     result = vm_delete(instance);
     ASSERT(vm_result_check(result));
+
+    unlink(fileA);
+}
+
+static void vm_mmap_file_portion_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    vm_t *instance;
+    vm_mmap_t *map;
+    vm_count_t page_size = (vm_count_t)getpagesize();
+    vm_count_t alloc_size = page_size * 33, file_size = alloc_size - 100;
+    vm_count_t map_offset = page_size * 17, read_length = 2 * page_size, map_length = read_length - 50;
+    vm_count_t length;
+    char *fileA = "./vm-tests-fileA";
+    char *dataA = 0, *read_dataA = 0;
+    int file;
+    ssize_t bytes;
+
+    dataA = malloc(alloc_size);
+    ASSERT(0 != dataA);
+    read_dataA = malloc(alloc_size);
+    ASSERT(0 != read_dataA);
+
+    memset(dataA, 0, alloc_size);
+    memset(read_dataA, 0, alloc_size);
+
+    for (char *p = dataA, *endp = p + file_size; endp > p; p++)
+    {
+        unsigned char i = (unsigned char)((p - dataA) >> 12);
+        unsigned char j = (p - dataA) & 0xf;
+        *p = (char )((i << 4) | j);
+    }
+
+    file = open(fileA, O_RDWR | O_CREAT | O_EXCL, 0666);
+    ASSERT(-1 != file);
+    bytes = pwrite(file, dataA, file_size, 0);
+    ASSERT(file_size == bytes);
+    close(file);
+
+    memset(&config, 0, sizeof config);
+    config.vcpu_count = 1;
+
+    result = vm_create(&config, &instance);
+    ASSERT(vm_result_check(result));
+    ASSERT(0 != instance);
+
+    file = open(fileA, O_RDONLY);
+    ASSERT(-1 != file);
+    result = vm_mmap(instance, 0, file, map_offset, 0, map_length, &map);
+    ASSERT(vm_result_check(result));
+    ASSERT(0 != map);
+    close(file);
+
+    length = read_length;
+    result = vm_mread(instance, 0, read_dataA, &length);
+    ASSERT(vm_result_check(result));
+    ASSERT(read_length == length);
+    ASSERT(0 == memcmp(read_dataA, dataA + map_offset, read_length));
+
+    result = vm_delete(instance);
+    ASSERT(vm_result_check(result));
+
+    free(dataA);
+    free(read_dataA);
 
     unlink(fileA);
 }
@@ -285,6 +350,7 @@ void run_tests(void)
     TEST(vm_create_delete_test);
     TEST(vm_mmap_test);
     TEST(vm_mmap_file_test);
+    TEST(vm_mmap_file_portion_test);
     TEST(vm_start_wait_test);
     TEST(vm_run_error_test);
     TEST(vm_run_halt_test);

@@ -256,6 +256,14 @@ size_t strlen(const char *s)
     return lstrlenA(s);
 }
 
+static inline
+int getpagesize(void)
+{
+    SYSTEM_INFO sys_info;
+    GetSystemInfo(&sys_info);
+    return sys_info.dwPageSize;
+}
+
 /*
  * startup
  */

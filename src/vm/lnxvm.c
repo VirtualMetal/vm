@@ -336,13 +336,15 @@ vm_result_t vm_delete(vm_t *instance)
 }
 
 vm_result_t vm_mmap(vm_t *instance,
-    void *host_address, int file, vm_count_t guest_address, vm_count_t length,
+    void *host_address, int file, vm_count_t file_offset,
+    vm_count_t guest_address, vm_count_t length,
     vm_mmap_t **pmap)
 {
     vm_result_t result;
     vm_mmap_t *map = 0;
     size_t page_size;
     struct stat stbuf;
+    vm_count_t file_end_offset, file_size;
     uint8_t *head;
     uint64_t head_length;
     struct kvm_userspace_memory_region region;
@@ -353,6 +355,7 @@ vm_result_t vm_mmap(vm_t *instance,
     length = (length + page_size - 1) & ~(page_size - 1);
 
     if (0 != ((uintptr_t)host_address & (page_size - 1)) ||
+        0 != (file_offset & (page_size - 1)) ||
         0 != (guest_address & (page_size - 1)) ||
         0 == length)
     {
@@ -370,6 +373,7 @@ vm_result_t vm_mmap(vm_t *instance,
     memset(map, 0, sizeof *map);
     list_init(&map->mmap_link);
         /* ensure that vm_munmap works even if we do not insert into the instance->mmap_list */
+
     map->guest_address = guest_address;
 
     pthread_mutex_lock(&instance->mmap_lock);
@@ -406,26 +410,47 @@ vm_result_t vm_mmap(vm_t *instance,
             goto exit;
         }
 
-        map->region_length = length;
-        map->region = mmap(
-            0, length, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-        if (MAP_FAILED == map->region)
+        file_end_offset = file_offset + length;
+        file_size = (size_t)stbuf.st_size;
+        if (file_end_offset > file_size)
+            file_end_offset = file_size;
+
+        head_length = file_end_offset - file_offset;
+        head_length = (head_length + page_size - 1) & ~(page_size - 1);
+
+        if (length > head_length)
         {
-            result = vm_result(VM_ERROR_MEMORY, errno);
-            goto exit;
+            map->region_length = length;
+            map->region = mmap(
+                0, length, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+            if (MAP_FAILED == map->region)
+            {
+                result = vm_result(VM_ERROR_MEMORY, errno);
+                goto exit;
+            }
+            map->has_region = 1;
+
+            head = mmap(
+                map->region, file_end_offset - file_offset, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE,
+                file, (off_t)file_offset);
+            if (MAP_FAILED == head)
+            {
+                result = vm_result(VM_ERROR_MEMORY, errno);
+                goto exit;
+            }
         }
-        map->has_region = 1;
-
-        head_length = ((size_t)stbuf.st_size + page_size - 1) & ~(page_size - 1);
-        if (head_length > length)
-            head_length = length;
-
-        head = mmap(
-            map->region, head_length, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE, file, 0);
-        if (MAP_FAILED == head)
+        else
         {
-            result = vm_result(VM_ERROR_MEMORY, errno);
-            goto exit;
+            map->region_length = length;
+            map->region = mmap(
+                0, file_end_offset - file_offset, PROT_READ | PROT_WRITE, MAP_PRIVATE,
+                file, (off_t)file_offset);
+            if (MAP_FAILED == map->region)
+            {
+                result = vm_result(VM_ERROR_MEMORY, errno);
+                goto exit;
+            }
+            map->has_region = 1;
         }
     }
     else if (0 != host_address && -1 == file)

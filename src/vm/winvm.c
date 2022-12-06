@@ -41,6 +41,7 @@ struct vm
 struct vm_mmap
 {
     list_link_t mmap_link;              /* protected by mmap_lock */
+    PUINT8 file_alloc;
     PUINT8 head, tail;
     UINT64 head_length, tail_length;
     UINT64 guest_address;
@@ -234,14 +235,16 @@ vm_result_t vm_delete(vm_t *instance)
 }
 
 vm_result_t vm_mmap(vm_t *instance,
-    void *host_address, int file, vm_count_t guest_address, vm_count_t length,
+    void *host_address, int file, vm_count_t file_offset,
+    vm_count_t guest_address, vm_count_t length,
     vm_mmap_t **pmap)
 {
     vm_result_t result;
     vm_mmap_t *map = 0;
     SYSTEM_INFO sys_info;
+    BY_HANDLE_FILE_INFORMATION file_info;
+    vm_count_t file_alloc_offset, file_end_offset, file_size;
     HANDLE mapping = 0;
-    MEMORY_BASIC_INFORMATION mem_info;
     HRESULT hresult;
 
     *pmap = 0;
@@ -250,6 +253,7 @@ vm_result_t vm_mmap(vm_t *instance,
     length = (length + sys_info.dwPageSize - 1) & ~(sys_info.dwPageSize - 1);
 
     if (0 != ((UINT_PTR)host_address & (sys_info.dwPageSize - 1)) ||
+        0 != (file_offset & (sys_info.dwPageSize - 1)) ||
         0 != (guest_address & (sys_info.dwPageSize - 1)) ||
         0 == length)
     {
@@ -267,6 +271,7 @@ vm_result_t vm_mmap(vm_t *instance,
     memset(map, 0, sizeof *map);
     list_init(&map->mmap_link);
         /* ensure that vm_munmap works even if we do not insert into the instance->mmap_list */
+
     map->guest_address = guest_address;
 
     if (0 == host_address && -1 == file)
@@ -282,6 +287,18 @@ vm_result_t vm_mmap(vm_t *instance,
     }
     else if (0 == host_address && -1 != file)
     {
+        if (!GetFileInformationByHandle((HANDLE)(UINT_PTR)file, &file_info))
+        {
+            result = vm_result(VM_ERROR_FILE, GetLastError());
+            goto exit;
+        }
+
+        file_alloc_offset = file_offset & ~(sys_info.dwAllocationGranularity - 1);
+        file_end_offset = file_offset + length;
+        file_size = ((UINT64)file_info.nFileSizeHigh << 32) | ((UINT64)file_info.nFileSizeLow);
+        if (file_end_offset > file_size)
+            file_end_offset = file_size;
+
         mapping = CreateFileMappingW((HANDLE)(UINT_PTR)file,
             0, PAGE_WRITECOPY, 0, 0, 0);
         if (0 == mapping)
@@ -290,21 +307,19 @@ vm_result_t vm_mmap(vm_t *instance,
             goto exit;
         }
 
-        map->head = MapViewOfFile(mapping, FILE_MAP_COPY, 0, 0, 0);
-        if (0 == map->head)
+        map->head_length = file_end_offset - file_offset;
+        map->head_length = (map->head_length + sys_info.dwPageSize - 1) & ~(sys_info.dwPageSize - 1);
+        map->file_alloc = MapViewOfFile(mapping, FILE_MAP_COPY,
+            (DWORD)(file_alloc_offset >> 32), (DWORD)file_alloc_offset,
+            file_end_offset - file_alloc_offset);
+        if (0 == map->file_alloc)
         {
             result = vm_result(VM_ERROR_MEMORY, GetLastError());
             goto exit;
         }
+        map->head = map->file_alloc + (file_offset - file_alloc_offset);
         map->has_head = 1;
 
-        if (0 == VirtualQuery(map->head, &mem_info, sizeof mem_info))
-        {
-            result = vm_result(VM_ERROR_MEMORY, GetLastError());
-            goto exit;
-        }
-
-        map->head_length = mem_info.RegionSize;
         if (length > map->head_length)
         {
             map->tail_length = length - map->head_length;
@@ -386,12 +401,12 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
             map->guest_address, map->head_length);
 
     if (map->has_tail)
-    {
         VirtualFree(map->tail, 0, MEM_RELEASE);
-        UnmapViewOfFile(map->head);
-    }
-    else if (map->has_head)
-        VirtualFree(map->head, 0, MEM_RELEASE);
+    if (map->has_head)
+        if (0 != map->file_alloc)
+            UnmapViewOfFile(map->file_alloc);
+        else
+            VirtualFree(map->head, 0, MEM_RELEASE);
 
     free(map);
 

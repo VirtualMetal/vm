@@ -144,7 +144,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
                 }
             }
 
-            result = vm_mmap(instance, 0, file, guest_address, length, &map);
+            result = vm_mmap(instance, 0, file, 0, guest_address, length, &map);
                 /* do not track map; vm_delete will free it */
 
             if (',' == *p)
