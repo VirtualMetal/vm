@@ -28,12 +28,13 @@ typedef long long vm_result_t;
 #define VM_ERROR_MISUSE                 (-2LL<<48)  /* function misuse (e.g. invalid args) */
 #define VM_ERROR_RESOURCES              (-3LL<<48)  /* insufficient resources (e.g. out of memory) */
 #define VM_ERROR_FILE                   (-4LL<<48)  /* file error (e.g. cannot find file) */
-#define VM_ERROR_NETWORK                (-5LL<<48)  /* network error (e.g. cannot connect) */
-#define VM_ERROR_CONFIG                 (-6LL<<48)  /* configuration error */
-#define VM_ERROR_HYPERVISOR             (-7LL<<48)  /* hypervisor error (e.g. not present) */
-#define VM_ERROR_MEMORY                 (-8LL<<48)  /* memory error (e.g. invalid address) */
-#define VM_ERROR_VCPU                   (-9LL<<48)  /* virtual cpu error (e.g. cannot create) */
-#define VM_ERROR_TERMINATED             (-10LL<<48) /* instance has terminated */
+#define VM_ERROR_EXECFILE               (-5LL<<48)  /* executable file error (e.g. bad file format) */
+#define VM_ERROR_NETWORK                (-6LL<<48)  /* network error (e.g. cannot connect) */
+#define VM_ERROR_CONFIG                 (-7LL<<48)  /* configuration error */
+#define VM_ERROR_HYPERVISOR             (-8LL<<48)  /* hypervisor error (e.g. not present) */
+#define VM_ERROR_MEMORY                 (-9LL<<48)  /* memory error (e.g. invalid address) */
+#define VM_ERROR_VCPU                   (-10LL<<48) /* virtual cpu error (e.g. cannot create) */
+#define VM_ERROR_TERMINATED             (-11LL<<48) /* instance has terminated */
 
 #define vm_result(e, r)                 ((vm_result_t)(e) | ((vm_result_t)(r) & VM_RESULT_REASON_MASK))
 #define vm_result_error(R)              ((vm_result_t)(R) & VM_RESULT_ERROR_MASK)
@@ -49,15 +50,25 @@ typedef unsigned long long vm_count_t;
 
 struct vm_config
 {
+    /* immutable */
     void (*logf)(const char *format, ...);
     vm_count_t log_flags;
     vm_count_t vcpu_count;              /* number of virtual cpu's */
+    vm_count_t reserved0[5];
+
+    /* reconfigurable */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
     vm_count_t vcpu_table;              /* virtual cpu data table address */
     vm_count_t page_table;              /* page table address */
-
-    vm_count_t reserved[26];
+    vm_count_t exec_textseg;            /* executable file text segment address */
+    vm_count_t exec_dataseg;            /* executable file data segment address */
+    vm_count_t reserved1[19];
 };
+
+#define VM_CONFIG_INDEX(F)              ((vm_count_t)&((vm_config_t *)0)->F / sizeof(vm_count_t))
+#define VM_CONFIG_BIT(F)                (1 << VM_CONFIG_INDEX(F))
+#define VM_CONFIG_FIELD(C, I)           ((vm_count_t *)((char *)(C) + I * sizeof(vm_count_t)))
+#define VM_CONFIG_RECONFIG_MASK         (0xffffff00ULL)
 
 #define VM_CONFIG_LOG_HYPERVISOR        1
 #define VM_CONFIG_LOG_DEBUGSERVER       0x80000000
@@ -105,6 +116,10 @@ vm_result_t vm_delete(vm_t *instance);
  *
  * @param instance
  *     The VM instance.
+ * @param guest_address
+ *     The guest address of the mapping.
+ * @param length
+ *     The length of the mapping. This parameter may not be 0.
  * @param host_address
  *     The host address to map. If 0 then new host memory will be allocated.
  * @param file
@@ -114,18 +129,19 @@ vm_result_t vm_delete(vm_t *instance);
  * @param file_offset
  *     The offset within the file to map. This parameter should be 0 if the
  *     file parameter is -1.
- * @param guest_address
- *     The guest address of the mapping.
- * @param length
- *     The length of the mapping. This parameter may not be 0.
+ * @param file_length
+ *     The length of the file to map. If this parameter is 0 then this is the
+ *     same as the length parameter. Otherwise this parameter must be less
+ *     than or equal to the length parameter. This parameter should be 0 if
+ *     the file parameter is -1.
  * @param pmap
  *     Pointer to location that will receive the new mapping.
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
 vm_result_t vm_mmap(vm_t *instance,
-    void *host_address, int file, vm_count_t file_offset,
     vm_count_t guest_address, vm_count_t length,
+    void *host_address, int file, vm_count_t file_offset, vm_count_t file_length,
     vm_mmap_t **pmap);
 
 /**
@@ -235,6 +251,26 @@ vm_result_t vm_mread(vm_t *instance,
  */
 vm_result_t vm_mwrite(vm_t *instance,
     void *buffer, vm_count_t guest_address, vm_count_t *plength);
+
+/**
+ * Reconfigure a VM instance.
+ *
+ * Reconfiguration is possible only if the instance has not been started.
+ * Not all configuration fields can be updated.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param config
+ *     The new configuration to use.
+ * @param mask
+ *     Specifies which configuration fields to update. Not all configuration
+ *     fields can be updated.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask);
 
 /**
  * Start a VM instance.
@@ -364,9 +400,48 @@ vm_result_t vm_debug_server_start(vm_t *instance,
  */
 vm_result_t vm_debug_server_stop(vm_t *instance);
 
+/**
+ * Debug a VM instance via the GDB remote protocol.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param strm
+ *     This function pointer is used to communicate with the remote client.
+ *     The dir parameter controls the communication direction and takes values
+ *     as follows: (+1) receive data, (-1) send data, and (-2) send OOB data.
+ * @param strmdata
+ *     Data to use when calling strm.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
 vm_result_t vm_gdb(vm_t *instance,
     vm_result_t (*strm)(void *strmdata, int dir, void *buffer, vm_count_t *plength),
     void *strmdata);
+
+/**
+ * Load executable file into guest memory.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param guest_address
+ *     The guest address of an additional mapping around the loaded file.
+ * @param length
+ *     The length of an additional mapping around the loaded file. If this
+ *     parameter is 0 then there is no additional mapping.
+ * @param file
+ *     The file to load.
+ * @param exec_flag
+ *     If 1 instance will execute the file upon start.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_load(vm_t *instance,
+    vm_count_t guest_address, vm_count_t length,
+    int file, int exec_flag);
 
 /**
  * Parse text configuration.

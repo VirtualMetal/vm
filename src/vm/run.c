@@ -66,6 +66,12 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
 
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
+        if (CMD("log"))
+        {
+            config.logf = strtoullint(p, &p, +1) ? config.logf : 0;
+            CHK('\0' == *p);
+        }
+        else
         if (CMD("log_flags"))
         {
             config.log_flags = strtoullint(p, &p, +1);
@@ -144,11 +150,33 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
                 }
             }
 
-            result = vm_mmap(instance, 0, file, 0, guest_address, length, &map);
+            result = vm_mmap(instance, guest_address, length, 0, file, 0, 0, &map);
                 /* do not track map; vm_delete will free it */
 
             if (',' == *p)
                 close(file);
+
+            if (!vm_result_check(result))
+                goto exit;
+        }
+        else
+        if (CMD("load") || CMD("exec"))
+        {
+            guest_address = strtoullint(p, &p, +1);
+            CHK(',' == *p);
+            length = strtoullint(p + 1, &p, +1);
+            CHK(',' == *p);
+
+            file = open(p + 1, O_RDONLY);
+            if (-1 == file)
+            {
+                result = vm_result(VM_ERROR_FILE, errno);
+                goto exit;
+            }
+
+            result = vm_load(instance, guest_address, length, file, 'e' == (*pp)[0]);
+
+            close(file);
 
             if (!vm_result_check(result))
                 goto exit;

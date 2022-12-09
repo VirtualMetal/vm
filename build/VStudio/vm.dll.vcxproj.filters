@@ -52,6 +52,9 @@
     <ClCompile Include="..\..\src\vm\gdb.c">
       <Filter>Source\vm</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\vm\load.c">
+      <Filter>Source\vm</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\vm\library.def">

@@ -63,6 +63,7 @@
     <ClCompile Include="..\..\..\src\tlib\testsuite.c" />
     <ClCompile Include="..\..\..\src\vm\gdb.c" />
     <ClCompile Include="..\..\..\src\vm\lnxvm.c" />
+    <ClCompile Include="..\..\..\src\vm\load.c" />
     <ClCompile Include="..\..\..\src\vm\result.c" />
     <ClCompile Include="..\..\..\src\vm\run.c" />
     <ClCompile Include="..\..\..\src\vm\textconf.c" />

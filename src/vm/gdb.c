@@ -389,8 +389,20 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
         }
         else
         if (0 == invariant_strncmp(packet + 1, "Offsets", sizeof "Offsets" - 1))
-            result = vm_gdb_sendf(state,
-                "Text=0;Data=0;Bss=0");
+        {
+            if (0 == state->instance->config.exec_dataseg)
+                result = vm_gdb_sendf(state,
+                    "TextSeg=%08x%08x",
+                    (unsigned)(state->instance->config.exec_textseg >> 32) & 0xffffffffU,
+                    (unsigned)(state->instance->config.exec_textseg) & 0xffffffffU);
+            else
+                result = vm_gdb_sendf(state,
+                    "TextSeg=%08x%08x;DataSeg=%08x%08x",
+                    (unsigned)(state->instance->config.exec_textseg >> 32) & 0xffffffffU,
+                    (unsigned)(state->instance->config.exec_textseg) & 0xffffffffU,
+                    (unsigned)(state->instance->config.exec_dataseg >> 32) & 0xffffffffU,
+                    (unsigned)(state->instance->config.exec_dataseg) & 0xffffffffU);
+        }
         else
         if (0 == invariant_strncmp(packet + 1, "Supported", sizeof "Supported" - 1))
             result = vm_gdb_sendf(state,

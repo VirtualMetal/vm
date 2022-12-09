@@ -125,10 +125,10 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
 static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
-static void vm_debug_log_mmap(vm_t *instance);
-static void vm_debug_log_cancel(vm_t *instance,
+static void vm_log_mmap(vm_t *instance);
+static void vm_log_vcpu_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result);
-static void vm_debug_log_exit(vm_t *instance,
+static void vm_log_vcpu_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result);
 static int vm_debug_server_listen(struct addrinfo *info, int ai_family);
 static void *vm_debug_server_thread(void *instance0);
@@ -336,8 +336,8 @@ vm_result_t vm_delete(vm_t *instance)
 }
 
 vm_result_t vm_mmap(vm_t *instance,
-    void *host_address, int file, vm_count_t file_offset,
     vm_count_t guest_address, vm_count_t length,
+    void *host_address, int file, vm_count_t file_offset, vm_count_t file_length,
     vm_mmap_t **pmap)
 {
     vm_result_t result;
@@ -357,7 +357,8 @@ vm_result_t vm_mmap(vm_t *instance,
     if (0 != ((uintptr_t)host_address & (page_size - 1)) ||
         0 != (file_offset & (page_size - 1)) ||
         0 != (guest_address & (page_size - 1)) ||
-        0 == length)
+        0 == length ||
+        file_length > length)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -410,7 +411,7 @@ vm_result_t vm_mmap(vm_t *instance,
             goto exit;
         }
 
-        file_end_offset = file_offset + length;
+        file_end_offset = file_offset + (0 != file_length ? file_length : length);
         file_size = (size_t)stbuf.st_size;
         if (file_end_offset > file_size)
             file_end_offset = file_size;
@@ -612,6 +613,33 @@ vm_result_t vm_mwrite(vm_t *instance,
     return VM_RESULT_SUCCESS;
 }
 
+vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask)
+{
+    vm_result_t result;
+
+    if (0 != pthread_mutex_trylock(&instance->vm_start_lock))
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        return result;
+    }
+
+    if (instance->has_vm_start)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    mask &= VM_CONFIG_RECONFIG_MASK;
+    for (vm_count_t index = 0; 0 != mask; mask >>= 1, index++)
+        if (mask & 1)
+            *VM_CONFIG_FIELD(&instance->config, index) = *VM_CONFIG_FIELD(config, index);
+
+exit:
+    pthread_mutex_unlock(&instance->vm_start_lock);
+
+    return result;
+}
+
 vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
@@ -629,9 +657,8 @@ vm_result_t vm_start(vm_t *instance)
         goto exit;
     }
 
-    if (instance->config.logf &&
-        0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR))
-        vm_debug_log_mmap(instance);
+    if (instance->config.logf)
+        vm_log_mmap(instance);
 
     pthread_mutex_lock(&instance->thread_lock);
 
@@ -1152,7 +1179,7 @@ static void *vm_thread(void *instance0)
                     has_debug_event = 1;
                 pthread_mutex_unlock(&instance->thread_lock);
                 if (has_debug_log)
-                    vm_debug_log_cancel(instance, vcpu_index, result);
+                    vm_log_vcpu_cancel(instance, vcpu_index, result);
                 if (!vm_result_check(result))
                     goto exit;
                 continue;
@@ -1196,7 +1223,7 @@ static void *vm_thread(void *instance0)
         }
 
         if (has_debug_log)
-            vm_debug_log_exit(instance, vcpu_index, vcpu_run, result);
+            vm_log_vcpu_exit(instance, vcpu_index, vcpu_run, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -1659,22 +1686,85 @@ exit:
 #endif
 }
 
-static void vm_debug_log_mmap(vm_t *instance)
+static void vm_log_mmap(vm_t *instance)
 {
+    const size_t data_maxlen = 64 * 1024;
+    char *data = 0;
+    ssize_t bytes;
+    int file;
+    struct mmap_path
+    {
+        uint64_t address0, address1;
+        char *path;
+    } mmap_path[128];
+    size_t mmap_path_count = 0;
+
+    data = malloc(data_maxlen);
+    if (0 == data)
+        goto skip_maps;
+
+    file = open("/proc/self/maps", O_RDONLY);
+    if (-1 == file)
+        goto skip_maps;
+
+    bytes = pread(file, data, data_maxlen, 0);
+    close(file);
+
+    if (-1 == bytes)
+        goto skip_maps;
+
+    for (char *p = data, *endp = p + bytes;
+        endp > p && sizeof mmap_path / sizeof mmap_path[0] > mmap_path_count;
+        p++)
+    {
+        uint64_t address0 = 0, address1 = 0;
+        char *path = 0;
+
+        address0 = strtoullint(p, &p, +16);
+        if ('-' == *p)
+            address1 = strtoullint(p + 1, &p, +16);
+
+        for (; endp > p && '\n' != *p; p++)
+            if ('/' == *p)
+                path = p + 1;
+        if (endp > p && address0 < address1 && 0 != path)
+        {
+            *p = '\0';
+            mmap_path[mmap_path_count].address0 = address0;
+            mmap_path[mmap_path_count].address1 = address1;
+            mmap_path[mmap_path_count].path = path;
+            mmap_path_count++;
+        }
+    }
+
+skip_maps:
     pthread_mutex_lock(&instance->mmap_lock);
 
-    list_traverse(link, next, &instance->mmap_list)
+    list_traverse(link, prev, &instance->mmap_list)
     {
         vm_mmap_t *map = (vm_mmap_t *)link;
-        instance->config.logf("mmap=%p,%p",
-            map->guest_address,
-            map->region_length);
+        char *path = 0;
+
+        for (size_t i = 0; mmap_path_count > i; i++)
+            if (mmap_path[i].address0 <= (uint64_t)map->region &&
+                (uint64_t)map->region < mmap_path[i].address1)
+            {
+                path = mmap_path[i].path;
+                break;
+            }
+
+        instance->config.logf("mmap %08x%08x %08x%08x%s%s",
+            (uint32_t)(map->guest_address >> 32), (uint32_t)map->guest_address,
+            (uint32_t)(map->region_length >> 32), (uint32_t)map->region_length,
+            path ? " " : "", path ? path : "");
     }
 
     pthread_mutex_unlock(&instance->mmap_lock);
+
+    free(data);
 }
 
-static void vm_debug_log_cancel(vm_t *instance,
+static void vm_log_vcpu_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result)
 {
     instance->config.logf("[%u] SIG_VCPU_CANCEL() = %s",
@@ -1682,7 +1772,7 @@ static void vm_debug_log_cancel(vm_t *instance,
         vm_result_error_string(result));
 }
 
-static void vm_debug_log_exit(vm_t *instance,
+static void vm_log_vcpu_exit(vm_t *instance,
     unsigned vcpu_index, struct kvm_run *vcpu_run, vm_result_t result)
 {
     switch (vcpu_run->exit_reason)

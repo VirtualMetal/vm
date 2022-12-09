@@ -46,7 +46,7 @@ static void vm_mmap_test(void)
     ASSERT(vm_result_check(result));
     ASSERT(0 != instance);
 
-    result = vm_mmap(instance, 0, -1, 0, 0, 1024 * 1024, &map);
+    result = vm_mmap(instance, 0, 1024 * 1024, 0, -1, 0, 0, &map);
     ASSERT(vm_result_check(result));
     ASSERT(0 != map);
 
@@ -105,7 +105,7 @@ static void vm_mmap_file_test(void)
 
     file = open(fileA, O_RDONLY);
     ASSERT(-1 != file);
-    result = vm_mmap(instance, 0, file, 0, 0, 1024 * 1024, &map);
+    result = vm_mmap(instance, 0, 1024 * 1024, 0, file, 0, 0, &map);
     ASSERT(vm_result_check(result));
     ASSERT(0 != map);
     close(file);
@@ -213,7 +213,7 @@ static void vm_mmap_file_portion_test(void)
 
     file = open(fileA, O_RDONLY);
     ASSERT(-1 != file);
-    result = vm_mmap(instance, 0, file, map_offset, 0, map_length, &map);
+    result = vm_mmap(instance, 0, map_length, 0, file, map_offset, 0, &map);
     ASSERT(vm_result_check(result));
     ASSERT(0 != map);
     close(file);

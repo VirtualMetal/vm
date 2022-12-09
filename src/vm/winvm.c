@@ -98,8 +98,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
-static void vm_debug_log_mmap(vm_t *instance);
-static void vm_debug_log_exit(vm_t *instance,
+static void vm_log_mmap(vm_t *instance);
+static void vm_log_vcpu_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
 static SOCKET vm_debug_server_listen(struct addrinfo *info, int ai_family);
 static DWORD WINAPI vm_debug_server_thread(PVOID instance0);
@@ -235,8 +235,8 @@ vm_result_t vm_delete(vm_t *instance)
 }
 
 vm_result_t vm_mmap(vm_t *instance,
-    void *host_address, int file, vm_count_t file_offset,
     vm_count_t guest_address, vm_count_t length,
+    void *host_address, int file, vm_count_t file_offset, vm_count_t file_length,
     vm_mmap_t **pmap)
 {
     vm_result_t result;
@@ -255,7 +255,8 @@ vm_result_t vm_mmap(vm_t *instance,
     if (0 != ((UINT_PTR)host_address & (sys_info.dwPageSize - 1)) ||
         0 != (file_offset & (sys_info.dwPageSize - 1)) ||
         0 != (guest_address & (sys_info.dwPageSize - 1)) ||
-        0 == length)
+        0 == length ||
+        file_length > length)
     {
         result = vm_result(VM_ERROR_MISUSE, 0);
         goto exit;
@@ -294,7 +295,7 @@ vm_result_t vm_mmap(vm_t *instance,
         }
 
         file_alloc_offset = file_offset & ~(sys_info.dwAllocationGranularity - 1);
-        file_end_offset = file_offset + length;
+        file_end_offset = file_offset + (0 != file_length ? file_length : length);
         file_size = ((UINT64)file_info.nFileSizeHigh << 32) | ((UINT64)file_info.nFileSizeLow);
         if (file_end_offset > file_size)
             file_end_offset = file_size;
@@ -541,6 +542,33 @@ vm_result_t vm_mwrite(vm_t *instance,
     return VM_RESULT_SUCCESS;
 }
 
+vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask)
+{
+    vm_result_t result;
+
+    if (!TryAcquireSRWLockExclusive(&instance->vm_start_lock))
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        return result;
+    }
+
+    if (instance->has_vm_start)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    mask &= VM_CONFIG_RECONFIG_MASK;
+    for (vm_count_t index = 0; 0 != mask; mask >>= 1, index++)
+        if (mask & 1)
+            *VM_CONFIG_FIELD(&instance->config, index) = *VM_CONFIG_FIELD(config, index);
+
+exit:
+    ReleaseSRWLockExclusive(&instance->vm_start_lock);
+
+    return result;
+}
+
 vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
@@ -557,9 +585,8 @@ vm_result_t vm_start(vm_t *instance)
         goto exit;
     }
 
-    if (instance->config.logf &&
-        0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR))
-        vm_debug_log_mmap(instance);
+    if (instance->config.logf)
+        vm_log_mmap(instance);
 
     AcquireSRWLockExclusive(&instance->thread_lock);
 
@@ -1061,7 +1088,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         }
 
         if (has_debug_log)
-            vm_debug_log_exit(instance, vcpu_index, &exit_context, result);
+            vm_log_vcpu_exit(instance, vcpu_index, &exit_context, result);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -1543,22 +1570,36 @@ exit:
 #endif
 }
 
-static void vm_debug_log_mmap(vm_t *instance)
+static void vm_log_mmap(vm_t *instance)
 {
     AcquireSRWLockExclusive(&instance->mmap_lock);
 
-    list_traverse(link, next, &instance->mmap_list)
+    list_traverse(link, prev, &instance->mmap_list)
     {
         vm_mmap_t *map = (vm_mmap_t *)link;
-        instance->config.logf("mmap=%p,%p",
-            map->guest_address,
-            map->head_length + map->tail_length);
+        UINT64 length;
+        char pathbuf[1024], *path = 0;
+
+        if (0 != map->file_alloc)
+            if (0 != GetMappedFileNameA(GetCurrentProcess(), map->file_alloc, pathbuf, sizeof pathbuf))
+            {
+                path = pathbuf;
+                for (char *p = pathbuf; *p; p++)
+                    if ('\\' == *p)
+                        path = p + 1;
+            }
+
+        length = map->head_length + map->tail_length;
+        instance->config.logf("mmap %08x%08x %08x%08x%s%s",
+            (UINT32)(map->guest_address >> 32), (UINT32)map->guest_address,
+            (UINT32)(length >> 32), (UINT32)length,
+            path ? " " : "", path ? path : "");
     }
 
     ReleaseSRWLockExclusive(&instance->mmap_lock);
 }
 
-static void vm_debug_log_exit(vm_t *instance,
+static void vm_log_vcpu_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result)
 {
     char *exit_reason_str;

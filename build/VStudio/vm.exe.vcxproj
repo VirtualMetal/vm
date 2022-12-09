@@ -18,6 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\gdb.c" />
+    <ClCompile Include="..\..\src\vm\load.c" />
     <ClCompile Include="..\..\src\vm\program.c" />
     <ClCompile Include="..\..\src\vm\result.c" />
     <ClCompile Include="..\..\src\vm\run.c" />

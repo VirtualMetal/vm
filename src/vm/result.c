@@ -27,6 +27,8 @@ const char *vm_result_error_string(vm_result_t result)
         return "VM_ERROR_RESOURCES";
     case VM_ERROR_FILE:
         return "VM_ERROR_FILE";
+    case VM_ERROR_EXECFILE:
+        return "VM_ERROR_EXECFILE";
     case VM_ERROR_CONFIG:
         return "VM_ERROR_CONFIG";
     case VM_ERROR_HYPERVISOR:
