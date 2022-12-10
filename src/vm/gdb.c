@@ -419,11 +419,16 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
                  * See https://sourceware.org/gdb/onlinedocs/gdb/Overview.html#Binary-Data
                  */
                 static char target_xml[] =
-                    "<target version=\"1.0\"><architecture>"
+                    "<target version=\"1.0\">"
+                        "<architecture>"
 #if (defined(_MSC_VER) && defined(_M_X64)) || (defined(__GNUC__) && defined(__x86_64__))
-                    "i386:x86-64"
+                            "i386:x86-64"
 #endif
-                    "</architecture></target>";
+                        "</architecture>"
+                        "<osabi>"
+                            "none"
+                        "</osabi>"
+                    "</target>";
                 p += sizeof "target.xml:" - 1;
                 result = vm_gdb_xfer_read(state, target_xml, p);
             }
