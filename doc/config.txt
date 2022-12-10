@@ -1,0 +1,90 @@
+# Text Configuration Format
+
+# A configuration file consists of lines ending with LF or CRLF.
+# A line that is blank or starts with a # is ignored.
+# Other white space is significant and is not ignored.
+
+# A line contains either a <name>=<value> pair or
+# a file path that contains a / (or \ on Windows).
+
+# A <name>=<value> pair is a configuration command with form:
+#<name>=<value>
+
+# A path is an command to include the file contents with form:
+#/path/to/file
+#./path/to/file
+#../path/to/file
+
+# There are three configuration phases (in order):
+#
+# - Create: configuration for instance creation.
+# - Memory: configuration for instance memory.
+# - Start : configuration for instance start.
+#
+# Configuration commands within the same phase are
+# applied in appearance order. Configuration commands
+# in different phases are applied in phase order.
+
+
+#
+# Create Phase
+#
+
+# Logging enable/disable.
+#log=(0|1)
+
+# Logging flags. See VM_CONFIG_LOG_* in vm/vm.h
+#log_flags=<flags>
+
+# Virtual CPU count. Count of 0 specifies all CPU's available.
+#vcpu_count=<count>
+
+
+#
+# Memory Phase
+#
+
+# Map memory at specified address and length and optionally map a file.
+#mmap=<address>,<length>[,<path>]
+
+# Load executable file and optionally (length != 0) map memory around it.
+#load=<address>,<length>,<path>
+
+# Execute executable file and optionally (length != 0) map memory around it.
+#exec=<address>,<length>,<path>
+
+
+#
+# Start Phase
+#
+
+# Virtual CPU entry point.
+#vcpu_entry=<address>
+
+# Virtual CPU table.
+#vcpu_table=<address>
+
+# Root page table address (PML4).
+#page_table=<address>
+#pg0=<address>
+
+# Page table level 1 entry (PML4E).
+#pg1=<address>[,<count>]
+
+# Page table level 2 entry (PDPTE).
+#pg2=<address>[,<count>]
+
+# Page table level 3 entry (PDE).
+#pg3=<address>[,<count>]
+
+# Page table level 4 entry (PTE).
+#pg4=<address>[,<count>]
+
+# Place raw data at specified address.
+#data=<address>,<count>[,<byte>...]
+
+# Debug server listening at specified host and port.
+#debug_host=[<host>]:<port>
+
+# Debug break upon instance start.
+#debug_break=(0|1)
