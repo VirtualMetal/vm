@@ -563,6 +563,8 @@ vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t ma
         if (mask & 1)
             *VM_CONFIG_FIELD(&instance->config, index) = *VM_CONFIG_FIELD(config, index);
 
+    result = VM_RESULT_SUCCESS;
+
 exit:
     ReleaseSRWLockExclusive(&instance->vm_start_lock);
 

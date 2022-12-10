@@ -78,50 +78,9 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             CHK('\0' == *p);
         }
         else
-        if (CMD("debug_host"))
-        {
-            int brk = '[' == *p ? (p++, ']') : ':';
-            for (char *q = debug_hostbuf, *endq = q + sizeof debug_hostbuf; endq > q && (*q = *p); p++, q++)
-                if (brk == *q)
-                {
-                    *q = '\0';
-                    break;
-                }
-            if (']' == brk)
-                CHK(']' == *p++);
-            CHK(':' == *p++);
-            debug_hostbuf[sizeof debug_hostbuf - 1] = '\0';
-            debug_host = *debug_hostbuf ? debug_hostbuf : 0;
-            debug_port = p;
-        }
-        else
-        if (CMD("debug_break"))
-        {
-            debug_break = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
-        }
-        else
         if (CMD("vcpu_count"))
         {
             config.vcpu_count = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
-        }
-        else
-        if (CMD("vcpu_entry"))
-        {
-            config.vcpu_entry = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
-        }
-        else
-        if (CMD("vcpu_table"))
-        {
-            config.vcpu_table = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
-        }
-        else
-        if (CMD("page_table") || CMD("pg0"))
-        {
-            config.page_table = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
     }
@@ -185,6 +144,26 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
 
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
+        if (CMD("vcpu_entry"))
+        {
+            config.vcpu_entry = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_entry));
+        }
+        else
+        if (CMD("vcpu_table"))
+        {
+            config.vcpu_table = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_table));
+        }
+        else
+        if (CMD("page_table") || CMD("pg0"))
+        {
+            config.page_table = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+            vm_reconfig(instance, &config, VM_CONFIG_BIT(page_table));
+        }
         if (CMI("pg", 1, 4))
         {
             guest_address = strtoullint(p, &p, +1);
@@ -196,7 +175,6 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             }
             else
                 count = 1;
-
             page_address = config.page_table;
             for (unsigned level = 1; cmi >= level; level++)
             {
@@ -245,6 +223,29 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
                 guest_address,
                 &length);
             CHK(count == length);
+        }
+        else
+        if (CMD("debug_host"))
+        {
+            int brk = '[' == *p ? (p++, ']') : ':';
+            for (char *q = debug_hostbuf, *endq = q + sizeof debug_hostbuf; endq > q && (*q = *p); p++, q++)
+                if (brk == *q)
+                {
+                    *q = '\0';
+                    break;
+                }
+            if (']' == brk)
+                CHK(']' == *p++);
+            CHK(':' == *p++);
+            debug_hostbuf[sizeof debug_hostbuf - 1] = '\0';
+            debug_host = *debug_hostbuf ? debug_hostbuf : 0;
+            debug_port = p;
+        }
+        else
+        if (CMD("debug_break"))
+        {
+            debug_break = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
         }
     }
 
