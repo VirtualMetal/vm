@@ -113,7 +113,7 @@ int main(int argc, char **argv)
     if (!vm_result_check(result))
         goto exit;
 
-    if (tconfigv != argv + 1)
+    if (tconfigv != argv + argi)
         vm_free_text_config(tconfigv);
     tconfigc = 0;
     tconfigv = 0;
