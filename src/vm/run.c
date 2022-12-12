@@ -164,6 +164,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             CHK('\0' == *p);
             vm_reconfig(instance, &config, VM_CONFIG_BIT(page_table));
         }
+        else
         if (CMI("pg", 1, 4))
         {
             guest_address = strtoullint(p, &p, +1);
