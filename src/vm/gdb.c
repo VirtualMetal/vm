@@ -78,7 +78,7 @@ vm_result_t vm_gdb(vm_t *instance,
     state.next_tid = 1;
 
     /* attach to debuggee upon connection (if not already attached) */
-    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0, 0);
     if (!vm_result_check(result))
     {
         if (VM_ERROR_MISUSE != vm_result_error(result))
@@ -93,19 +93,19 @@ vm_result_t vm_gdb(vm_t *instance,
     debug_events.self = &state;
     debug_events.handler = vm_gdb_events_handler;
     length = sizeof debug_events;
-    result = vm_debug(instance, VM_DEBUG_SETEVENTS, 0, &debug_events, &length);
+    result = vm_debug(instance, VM_DEBUG_SETEVENTS, 0, 0, &debug_events, &length);
     if (!vm_result_check(result))
         goto exit;
 
     /* stop the debuggee upon connection (if not already stopped) */
-    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
     if (!vm_result_check(result))
         goto exit;
 
     result = vm_gdb_loop(&state);
 
 exit:
-    vm_debug(instance, VM_DEBUG_SETEVENTS, 0, 0, 0);
+    vm_debug(instance, VM_DEBUG_SETEVENTS, 0, 0, 0, 0);
 
     free(buffer);
 
@@ -181,7 +181,7 @@ static vm_result_t vm_gdb_loop(struct vm_gdb_state *state)
                     break;
                 else if ('\x03' == *p)
                     /* interrupt: issue debug break */
-                    vm_debug(state->instance, VM_DEBUG_BREAK, 0, 0, 0);
+                    vm_debug(state->instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
                 p++;
             }
             packp = p++;
@@ -243,18 +243,18 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
 
     case 'c': /* continue */
     case 'C': /* continue with signal */
-        vm_debug(state->instance, VM_DEBUG_CONT, 0, 0, 0);
+        vm_debug(state->instance, VM_DEBUG_CONT, 0, 0, 0, 0);
         break;
 
     case 's': /* step */
     case 'S': /* step with signal */
-        vm_debug(state->instance, VM_DEBUG_STEP, (vm_count_t)(state->ctid - 1), 0, 0);
+        vm_debug(state->instance, VM_DEBUG_STEP, (vm_count_t)(state->ctid - 1), 0, 0, 0);
         break;
 
     case 'D': /* detach */
-        vm_debug(state->instance, VM_DEBUG_SETEVENTS, 0, 0, 0);
-        vm_debug(state->instance, VM_DEBUG_BREAK, 0, 0, 0);
-        vm_debug(state->instance, VM_DEBUG_DETACH, 0, 0, 0);
+        vm_debug(state->instance, VM_DEBUG_SETEVENTS, 0, 0, 0, 0);
+        vm_debug(state->instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
+        vm_debug(state->instance, VM_DEBUG_DETACH, 0, 0, 0, 0);
         state->is_detached = 1;
         result = vm_gdb_sendres(state, 1);
         break;
@@ -262,7 +262,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
     case 'g': /* read registers */
         length = MBUF_SIZE;
         ok = vm_result_check(
-            vm_debug(state->instance, VM_DEBUG_GETREGS, (vm_count_t)(state->gtid - 1),
+            vm_debug(state->instance, VM_DEBUG_GETREGS, (vm_count_t)(state->gtid - 1), 0,
                 state->mbuf, &length));
         if (ok)
         {
@@ -284,7 +284,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             hex_to_bin(p, q);
         length = (vm_count_t)(q - state->mbuf);
         ok = vm_result_check(
-            vm_debug(state->instance, VM_DEBUG_SETREGS, (vm_count_t)(state->gtid - 1),
+            vm_debug(state->instance, VM_DEBUG_SETREGS, (vm_count_t)(state->gtid - 1), 0,
                 state->mbuf, &length));
         result = vm_gdb_sendres(state, ok);
         break;
@@ -327,12 +327,16 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             length = strtoullint(p + 1, &p, 16);
             if ('\0' == *p && 0 < length && length <= MBUF_SIZE)
             {
-                vm_mread(state->instance, address, state->mbuf, &length);
-                for (p = state->mbuf, endp = p + length, q = state->obuf + 1; endp > p; p++, q += 2)
-                    bin_to_hex(p, q);
-                *q = '\0';
-                ok = 1;
-                result = vm_gdb_sendbuf(state);
+                ok = vm_result_check(
+                    vm_debug(state->instance, VM_DEBUG_GETVMEM, (vm_count_t)(state->gtid - 1), address,
+                        state->mbuf, &length));
+                if (ok)
+                {
+                    for (p = state->mbuf, endp = p + length, q = state->obuf + 1; endp > p; p++, q += 2)
+                        bin_to_hex(p, q);
+                    *q = '\0';
+                    result = vm_gdb_sendbuf(state);
+                }
             }
         }
         if (!ok)
@@ -353,8 +357,10 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
                 for (q = state->mbuf; endq > q && p[0] && p[1]; p += 2, q++)
                     hex_to_bin(p, q);
                 written = (vm_count_t)(q - state->mbuf);
-                vm_mwrite(state->instance, state->mbuf, address, &written);
-                ok = written == length;
+                ok = vm_result_check(
+                    vm_debug(state->instance, VM_DEBUG_SETVMEM, (vm_count_t)(state->gtid - 1), address,
+                        state->mbuf, &written));
+                ok = ok && written == length;
             }
         }
         result = vm_gdb_sendres(state, ok);
@@ -364,7 +370,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
         if (0 == invariant_strncmp(packet + 1, "Attached", sizeof "Attached" - 1))
             result = vm_gdb_sendf(state, "%d", state->is_attached);
         else if (0 == invariant_strncmp(packet + 1, "C", sizeof "C" - 1))
-            result = vm_gdb_sendf(state, "QC%d", state->gtid);
+            result = vm_gdb_sendf(state, "QC%d", state->ctid);
         else
         if (0 == invariant_strncmp(packet + 1, "fThreadInfo", sizeof "fThreadInfo" - 1) ||
             0 == invariant_strncmp(packet + 1, "sThreadInfo", sizeof "sThreadInfo" - 1))
@@ -459,12 +465,9 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             {
                 address = strtoullint(p + 1, &p, +16);
                 if (',' == *p)
-                {
-                    length = sizeof address;
                     ok = vm_result_check(
                         vm_debug(state->instance, 'Z' == packet[0] ? VM_DEBUG_SETBP : VM_DEBUG_DELBP,
-                            0, &address, &length));
-                }
+                            (vm_count_t)(state->gtid - 1), address, 0, 0));
             }
             result = vm_gdb_sendres(state, ok);
         }

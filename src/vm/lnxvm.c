@@ -116,7 +116,8 @@ struct vm_debug_socket
         has_send_oob_lock:1;
 };
 
-static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+static vm_result_t vm_debug_internal(vm_t *instance,
+    vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
@@ -125,6 +126,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
 static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
+static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
+    vm_count_t guest_virtual_address, vm_count_t *pguest_address);
 static void vm_log_mmap(vm_t *instance);
 static void vm_log_vcpu_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result);
@@ -740,7 +743,8 @@ vm_result_t vm_terminate(vm_t *instance)
     return VM_RESULT_SUCCESS;
 }
 
-vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+vm_result_t vm_debug(vm_t *instance,
+    vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength)
 {
     vm_result_t result;
@@ -762,7 +766,7 @@ vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
         goto exit;
     }
 
-    result = vm_debug_internal(instance, control, vcpu_index, buffer, plength);
+    result = vm_debug_internal(instance, control, vcpu_index, address, buffer, plength);
 
 exit:
     pthread_mutex_unlock(&instance->thread_lock);
@@ -774,7 +778,8 @@ exit:
     return result;
 }
 
-static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+static vm_result_t vm_debug_internal(vm_t *instance,
+    vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength)
 {
     vm_result_t result;
@@ -855,13 +860,10 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
         debug->events = (vm_debug_events_t){ 0 };
 
         for (vm_count_t index = debug->bp_count - 1; debug->bp_count > index; index--)
-        {
-            vm_count_t length = sizeof debug->bp_address[index];
-            vm_debug_internal(instance, VM_DEBUG_DELBP, 0, &debug->bp_address[index], &length);
-        }
+            vm_debug_internal(instance, VM_DEBUG_DELBP, ~0ULL, debug->bp_address[index], 0, 0);
 
         debug->is_debugged = 0;
-        vm_debug_internal(instance, VM_DEBUG_CONT, 0, 0, 0);
+        vm_debug_internal(instance, VM_DEBUG_CONT, 0, 0, 0, 0);
 
         pthread_cond_destroy(&debug->wait_cvar);
         pthread_cond_destroy(&debug->cont_cvar);
@@ -965,6 +967,45 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             goto exit;
         break;
 
+    case VM_DEBUG_GETVMEM:
+    case VM_DEBUG_SETVMEM:
+        if (instance->is_terminated)
+        {
+            result = vm_result(VM_ERROR_TERMINATED, 0);
+            goto exit;
+        }
+        if (!debug->is_stopped)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
+
+        {
+            vm_count_t guest_address;
+            vm_count_t length;
+
+            length = *plength;
+            *plength = 0;
+
+            if (~0ULL != vcpu_index)
+            {
+                result = vm_vcpu_translate(instance,
+                    instance->debug_thread_data[vcpu_index].vcpu_fd, address, &guest_address);
+                if (!vm_result_check(result))
+                    goto exit;
+            }
+            else
+                guest_address = address;
+
+            if (VM_DEBUG_GETVMEM == control)
+                vm_mread(instance, guest_address, buffer, &length);
+            else
+                vm_mwrite(instance, buffer, guest_address, &length);
+
+            *plength = length;
+        }
+        break;
+
     case VM_DEBUG_SETBP:
     case VM_DEBUG_DELBP:
         if (instance->is_terminated)
@@ -972,21 +1013,29 @@ static vm_result_t vm_debug_internal(vm_t *instance, vm_count_t control, vm_coun
             result = vm_result(VM_ERROR_TERMINATED, 0);
             goto exit;
         }
-        if (!debug->is_stopped || sizeof(vm_count_t) > *plength)
+        if (!debug->is_stopped)
         {
             result = vm_result(VM_ERROR_MISUSE, 0);
             goto exit;
         }
 
         {
-            vm_count_t bp_address = *(vm_count_t *)buffer;
+            vm_count_t bp_address;
             vm_count_t index;
 #if defined(__x86_64__)
             uint32_t bp_value = 0, bp_instr = 0xcc/* INT3 instruction */;
             vm_count_t bp_length, bp_expected = 1;
 #endif
 
-            *plength = sizeof(vm_count_t);
+            if (~0ULL != vcpu_index)
+            {
+                result = vm_vcpu_translate(instance,
+                    instance->debug_thread_data[vcpu_index].vcpu_fd, address, &bp_address);
+                if (!vm_result_check(result))
+                    goto exit;
+            }
+            else
+                bp_address = address;
 
             for (index = 0; debug->bp_count > index; index++)
                 if (debug->bp_address[index] == bp_address)
@@ -1686,6 +1735,32 @@ static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm
 exit:
     return result;
 #endif
+}
+
+static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
+    vm_count_t guest_virtual_address, vm_count_t *pguest_address)
+{
+    vm_result_t result;
+    struct kvm_translation translation = { .linear_address = guest_virtual_address };
+
+    *pguest_address = 0;
+
+    if (-1 == ioctl(vcpu_fd, (int)KVM_TRANSLATE, &translation))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+    if (!translation.valid)
+    {
+        result = vm_result(VM_ERROR_MEMORY, 0);
+        goto exit;
+    }
+
+    *pguest_address = translation.physical_address;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 }
 
 static void vm_log_mmap(vm_t *instance)

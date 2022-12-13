@@ -117,7 +117,7 @@ vm_result_t vm_load_elf(vm_t *instance,
     Elf64_Phdr load_phdr = { 0 };
     Elf64_Addr min_paddr = 0 != length ? guest_address : 0;
     Elf64_Half load_count = 0;
-    vm_config_t config = { 0 };
+    vm_config_t config;
     vm_mmap_t *map[1 + 2 * VM_LOAD_HEADER_MAXLEN / sizeof *phdr];
     size_t map_count = 0;
 
@@ -151,6 +151,8 @@ vm_result_t vm_load_elf(vm_t *instance,
     }
 
     config.vcpu_entry = ehdr->e_entry;
+    config.exec_textseg = 0;
+    config.exec_dataseg = 0;
 
     phdr = (Elf64_Phdr *)((char *)buffer + ehdr->e_phoff);
 

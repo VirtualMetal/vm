@@ -329,6 +329,8 @@ vm_result_t vm_terminate(vm_t *instance);
 #define VM_DEBUG_STEP                   ((vm_count_t)'s')   /**< single step the VM instance */
 #define VM_DEBUG_GETREGS                ((vm_count_t)'g')   /**< get registers (GDB format) */
 #define VM_DEBUG_SETREGS                ((vm_count_t)'G')   /**< set registers (GDB format) */
+#define VM_DEBUG_GETVMEM                ((vm_count_t)'m')   /**< get virtual memory (GDB format) */
+#define VM_DEBUG_SETVMEM                ((vm_count_t)'M')   /**< set virtual memory (GDB format) */
 #define VM_DEBUG_SETBP                  ((vm_count_t)'Z')   /**< set breakpoint */
 #define VM_DEBUG_DELBP                  ((vm_count_t)'z')   /**< delete breakpoint */
 
@@ -352,18 +354,24 @@ struct vm_debug_events
  *     One of the VM_DEBUG_* codes.
  * @param vcpu_index
  *     The virtual CPU index. This parameter is used only for the
- *     *REGS codes.
+ *     *REGS, *VMEM, and *BP codes.
+ * @param address
+ *     The guest address. If the vcpu_index parameter is ~0ULL, this is
+ *     interpretted as a physical address, else it is interpretted as a
+ *     virtual address. This parameter is used only for the
+ *     *VMEM, and *BP codes.
  * @param buffer
  *     The buffer to read/write into. This parameter is used only for the
- *     SETEVENTS, *REGS, and *BP codes.
+ *     SETEVENTS, *REGS, and *VMEM codes.
  * @param plength
  *     On input it contains the length of the buffer. On output it receives
  *     the number of bytes read/written. This parameter is used only for the
- *     SETEVENTS, *REGS, and *BP codes.
+ *     SETEVENTS, *REGS, and *VMEM codes.
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
-vm_result_t vm_debug(vm_t *instance, vm_count_t control, vm_count_t vcpu_index,
+vm_result_t vm_debug(vm_t *instance,
+    vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
 
 /**

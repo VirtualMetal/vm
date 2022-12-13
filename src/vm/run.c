@@ -259,10 +259,10 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
 
     if (debug_break)
     {
-        result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0);
+        result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0, 0);
         if (!vm_result_check(result))
             goto exit;
-        result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0);
+        result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -270,6 +270,13 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
     result = vm_start(instance);
     if (!vm_result_check(result))
         goto exit;
+
+    if (debug_break)
+    {
+        result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0, 0);
+        if (!vm_result_check(result))
+            goto exit;
+    }
 
     if (0 != debug_port)
     {

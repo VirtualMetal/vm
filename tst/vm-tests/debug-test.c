@@ -39,45 +39,110 @@ static void vm_debug_test(void)
     result = vm_run(&config, tconfigv, &instance);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
     regl = sizeof regs;
-    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, regs, &regl);
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
     ASSERT(vm_result_check(result));
 
     /* set rip = 2; skip over `jmp 0` instruction */
     regs[128] = 2;
 
-    result = vm_debug(instance, VM_DEBUG_SETREGS, 0, regs, &regl);
+    result = vm_debug(instance, VM_DEBUG_SETREGS, 0, 0, regs, &regl);
     ASSERT(vm_result_check(result));
 
     /* step over `nop` instruction */
-    result = vm_debug(instance, VM_DEBUG_STEP, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_STEP, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
     regl = sizeof regs;
-    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, regs, &regl);
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
     ASSERT(vm_result_check(result));
 
     /* assert rip == 3 */
     ASSERT(regs[128] == 3);
 
     /* step over `hlt` instruction; will cause termination */
-    result = vm_debug(instance, VM_DEBUG_STEP, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_STEP, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
     result = vm_wait(instance);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_DETACH, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_DETACH, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
+
+    result = vm_delete(instance);
+    ASSERT(vm_result_check(result));
+}
+
+static void vm_debug_bp_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    char *tconfigv[] =
+    {
+        "mmap=0,0x10000",
+        "pg0=0x1000",
+        "pg1=0x2003",
+        "pg2=0x0083,512",
+        "vcpu_table=0x3000",
+        "vcpu_entry=0x0000",
+        "debug_break=1",
+        "data=0,4,0x90,0x90,0x90,0xf4", /* nop; nop; nop; hlt */
+        0,
+    };
+    vm_t *instance;
+    char regs[1024];
+    vm_count_t regl;
+    unsigned char ins[1];
+    vm_count_t insl;
+
+    memset(&config, 0, sizeof config);
+    config.vcpu_count = 1;
+
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_SETBP, 0, 2, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_CONT, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_DELBP, 0, 2, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    regl = sizeof regs;
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
+    ASSERT(vm_result_check(result));
+
+    /* assert rip == 2 */
+    ASSERT(regs[128] == 2);
+
+    result = vm_debug(instance, VM_DEBUG_SETBP, 0, 1, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_DETACH, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_wait(instance);
+    ASSERT(vm_result_check(result));
+
+    insl = sizeof ins;
+    vm_mread(instance, 1, &ins, &insl);
+    ASSERT(sizeof ins == insl);
+    ASSERT(0x90 == ins[0]);
 
     result = vm_delete(instance);
     ASSERT(vm_result_check(result));
@@ -183,5 +248,6 @@ static void vm_debug_server_test(void)
 void debug_tests(void)
 {
     TEST(vm_debug_test);
+    TEST(vm_debug_bp_test);
     TEST(vm_debug_server_test);
 }
