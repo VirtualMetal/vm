@@ -108,7 +108,7 @@ typedef struct
 
 vm_result_t vm_load_elf(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
-    int file, int exec_flag,
+    int file, vm_count_t flags,
     vm_count_t page_size, void *buffer, vm_count_t buflen)
 {
     vm_result_t result;
@@ -236,12 +236,12 @@ vm_result_t vm_load_elf(vm_t *instance,
         map_count++;
     }
 
-    if (exec_flag)
+    if (0 != (flags & VM_LOAD_EXEC))
     {
-        result = vm_reconfig(instance, &config,
-            VM_CONFIG_BIT(vcpu_entry) |
-            VM_CONFIG_BIT(exec_textseg) |
-            VM_CONFIG_BIT(exec_dataseg));
+        vm_count_t mask = VM_CONFIG_BIT(vcpu_entry);
+        if (0 != (flags & VM_LOAD_EXEC_REPORT))
+            mask |= VM_CONFIG_BIT(exec_textseg) | VM_CONFIG_BIT(exec_dataseg);
+        result = vm_reconfig(instance, &config, mask);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -258,7 +258,7 @@ exit:
 
 vm_result_t vm_load(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
-    int file, int exec_flag)
+    int file, vm_count_t flags)
 {
     vm_result_t result;
     vm_count_t page_size = (vm_count_t)getpagesize();
@@ -290,7 +290,7 @@ vm_result_t vm_load(vm_t *instance,
     result = VM_ERROR_EXECFILE;
     if (4 <= buflen &&
         127 == buffer[0] && 'E' == buffer[1] && 'L' == buffer[2] && 'F' == buffer[3])
-        result = vm_load_elf(instance, guest_address, length, file, exec_flag,
+        result = vm_load_elf(instance, guest_address, length, file, flags,
             page_size, buffer, buflen);
     if (!vm_result_check(result))
         goto exit;

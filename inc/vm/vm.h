@@ -66,9 +66,9 @@ struct vm_config
 };
 
 #define VM_CONFIG_INDEX(F)              ((vm_count_t)&((vm_config_t *)0)->F / sizeof(vm_count_t))
-#define VM_CONFIG_BIT(F)                (1 << VM_CONFIG_INDEX(F))
-#define VM_CONFIG_FIELD(C, I)           ((vm_count_t *)((char *)(C) + I * sizeof(vm_count_t)))
-#define VM_CONFIG_RECONFIG_MASK         (0xffffff00ULL)
+#define VM_CONFIG_BIT(F)                ((vm_count_t)(1 << VM_CONFIG_INDEX(F)))
+#define VM_CONFIG_FIELD(C, I)           (*(vm_count_t *)((char *)(C) + I * sizeof(vm_count_t)))
+#define VM_CONFIG_RECONFIG_MASK         ((vm_count_t)0xffffff00ULL)
 
 #define VM_CONFIG_LOG_HYPERVISOR        1
 #define VM_CONFIG_LOG_DEBUGSERVER       0x80000000
@@ -428,6 +428,9 @@ vm_result_t vm_gdb(vm_t *instance,
     vm_result_t (*strm)(void *strmdata, int dir, void *buffer, vm_count_t *plength),
     void *strmdata);
 
+#define VM_LOAD_EXEC                    ((vm_count_t)0x01)  /**< execute file */
+#define VM_LOAD_EXEC_REPORT             ((vm_count_t)0x02)  /**< report loaded segments to debugger */
+
 /**
  * Load executable file into guest memory.
  *
@@ -442,14 +445,14 @@ vm_result_t vm_gdb(vm_t *instance,
  *     parameter is 0 then there is no additional mapping.
  * @param file
  *     The file to load.
- * @param exec_flag
- *     If 1 instance will execute the file upon start.
+ * @param flags
+ *     Combination of the VM_LOAD_* flags.
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
 vm_result_t vm_load(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
-    int file, int exec_flag);
+    int file, vm_count_t flags);
 
 /**
  * Parse text configuration.

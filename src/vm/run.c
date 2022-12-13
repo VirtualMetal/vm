@@ -133,7 +133,8 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
                 goto exit;
             }
 
-            result = vm_load(instance, guest_address, length, file, 'e' == (*pp)[0]);
+            result = vm_load(instance, guest_address, length, file,
+                'e' == (*pp)[0] ? VM_LOAD_EXEC | VM_LOAD_EXEC_REPORT : 0);
 
             close(file);
 

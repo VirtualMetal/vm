@@ -564,7 +564,7 @@ vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t ma
     mask &= VM_CONFIG_RECONFIG_MASK;
     for (vm_count_t index = 0; 0 != mask; mask >>= 1, index++)
         if (mask & 1)
-            *VM_CONFIG_FIELD(&instance->config, index) = *VM_CONFIG_FIELD(config, index);
+            VM_CONFIG_FIELD(&instance->config, index) = VM_CONFIG_FIELD(config, index);
 
     result = VM_RESULT_SUCCESS;
 
