@@ -508,7 +508,7 @@ static vm_result_t vm_gdb_xfer_read(struct vm_gdb_state *state, const char *anne
             length = end_offset - offset;
             if (length <= MBUF_SIZE)
             {
-                state->obuf[1] = 'l';
+                state->obuf[1] = end_offset < annex_length ? 'm' : 'l';
                 memcpy(state->obuf + 2, annex + offset, length);
                 state->obuf[2 + length] = '\0';
                 ok = 1;
