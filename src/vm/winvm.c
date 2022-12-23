@@ -1104,8 +1104,8 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
         case WHvRunVpExitReasonException:
 #if defined(_M_X64)
-            if (1 != exit_context.VpException.ExceptionType &&
-                3 != exit_context.VpException.ExceptionType)
+            if (WHvX64ExceptionTypeDebugTrapOrFault != exit_context.VpException.ExceptionType &&
+                WHvX64ExceptionTypeBreakpointTrap != exit_context.VpException.ExceptionType)
 #endif
             {
                 result = vm_result(VM_ERROR_VCPU, 0);
