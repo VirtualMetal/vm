@@ -14,8 +14,9 @@
 #include <vm/internal.h>
 #include <linux/kvm.h>
 
-#define SIG_VCPU_CANCEL                 (SIGRTMAX - 0)
-#define SIG_DBSRV_CANCEL                (SIGRTMAX - 1)
+/* our own signals -- do not use SIGRTMAX, which is used by valgrind */
+#define SIG_VCPU_CANCEL                 (SIGRTMAX - 1)
+#define SIG_DBSRV_CANCEL                (SIGRTMAX - 2)
 
 struct vm
 {
