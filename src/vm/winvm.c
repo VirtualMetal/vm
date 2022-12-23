@@ -57,7 +57,7 @@ struct vm_debug
     vm_debug_events_t events;
     CONDITION_VARIABLE stop_cvar, cont_cvar, wait_cvar;
         /* use condition variables for synchronization to streamline implementation across platforms */
-    vm_count_t stop_count, cont_count;
+    vm_count_t stop_cycle, stop_count, cont_cycle, cont_count;
     vm_count_t vcpu_index;
     vm_count_t bp_count;
     vm_count_t bp_address[64];
@@ -94,7 +94,7 @@ static vm_result_t vm_debug_internal(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
 static DWORD WINAPI vm_thread(PVOID instance0);
-static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index);
+static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOOL psingle_step);
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
@@ -745,7 +745,6 @@ static vm_result_t vm_debug_internal(vm_t *instance,
         InitializeConditionVariable(&debug->stop_cvar);
         InitializeConditionVariable(&debug->cont_cvar);
         InitializeConditionVariable(&debug->wait_cvar);
-        debug->cont_count = instance->config.vcpu_count;
         debug->is_debugged = 1;
 
         instance->debug = debug;
@@ -1024,7 +1023,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     vm_t *instance = instance0;
     UINT32 vcpu_index;
     BOOL has_vcpu = FALSE;
-    BOOL is_terminated, has_debug_event, has_debug_log;
+    BOOL is_terminated, has_debug_event, single_step, has_debug_log;
     HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
     HRESULT hresult;
@@ -1076,10 +1075,11 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     for (;;)
     {
+        single_step = FALSE;
         if (has_debug_event)
         {
             has_debug_event = FALSE;
-            result = vm_thread_debug_event(instance, vcpu_index);
+            result = vm_thread_debug_event(instance, vcpu_index, &single_step);
             if (!vm_result_check(result))
                 goto exit;
         }
@@ -1103,14 +1103,25 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             break;
 
         case WHvRunVpExitReasonException:
+#if defined(_M_X64)
+            if (1 != exit_context.VpException.ExceptionType &&
+                3 != exit_context.VpException.ExceptionType)
+#endif
+            {
+                result = vm_result(VM_ERROR_VCPU, 0);
+                break;
+            }
             result = VM_RESULT_SUCCESS;
             AcquireSRWLockExclusive(&instance->thread_lock);
             if (0 != instance->debug && instance->debug->is_debugged)
             {
                 instance->debug->stop_on_start = 1;
-                for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
-                    if (index != vcpu_index)
-                        WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+                if (!single_step)
+                {
+                    for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
+                        if (index != vcpu_index)
+                            WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+                }
                 has_debug_event = TRUE;
             }
             ReleaseSRWLockExclusive(&instance->thread_lock);
@@ -1169,7 +1180,7 @@ exit:
     return 0;
 }
 
-static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index)
+static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOOL psingle_step)
 {
 #define WAITCOND(cond, cvar)            \
     do                                  \
@@ -1181,53 +1192,81 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index)
         SleepConditionVariableSRW(cvar, &instance->thread_lock, INFINITE, 0);\
     } while (1)
 
-    struct vm_debug *debug;
-    BOOL is_terminated = FALSE, is_debugged = FALSE, single_step = FALSE;
-
-    AcquireSRWLockExclusive(&instance->thread_lock);
-
-    if (instance->is_terminated || 0 == (debug = instance->debug) || !debug->is_debugged)
-        goto skip_debug_event;
-
-    debug->cont_count--;
-    debug->stop_count++;
-    if (instance->config.vcpu_count == debug->stop_count)
+    for (;;)
     {
-        debug->is_stopped = 1;
-        if (0 != debug->events.handler)
-            debug->events.handler(debug->events.self, instance, VM_DEBUG_BREAK, ~0ULL/*vcpu_index*/);
-        WakeAllConditionVariable(&debug->stop_cvar);
-    }
+        struct vm_debug *debug;
+        BOOL is_terminated = FALSE, is_debugged = FALSE, single_step = FALSE, other_single_step = FALSE;
+        vm_count_t stop_cycle, cont_cycle;
 
-    WAITCOND(
-        debug->is_continued,
-        &debug->wait_cvar);
+        AcquireSRWLockExclusive(&instance->thread_lock);
 
-    debug->stop_count--;
-    debug->cont_count++;
-    if (instance->config.vcpu_count == debug->cont_count)
-    {
-        debug->is_continued = 0;
-        if (0 != debug->events.handler)
-            debug->events.handler(debug->events.self, instance, VM_DEBUG_CONT, ~0ULL/*vcpu_index*/);
-        WakeAllConditionVariable(&debug->cont_cvar);
-    }
-    else
+        if (instance->is_terminated || 0 == (debug = instance->debug) || !debug->is_debugged)
+            goto skip_debug_event;
+
+        /*
+         * Interruptible barrier:
+         *
+         * - Terminate and debug detach events exit the barrier. Otherwise:
+         * - All threads must stop and the is_stopped flag is set.
+         */
+        stop_cycle = debug->stop_cycle;
+        if (instance->config.vcpu_count > ++debug->stop_count)
+            WAITCOND(
+                stop_cycle != debug->stop_cycle,
+                &debug->stop_cvar);
+        else
+        {
+            debug->stop_count = 0;
+            debug->is_stopped = 1;
+            if (0 != debug->events.handler)
+                debug->events.handler(debug->events.self, instance, VM_DEBUG_BREAK, ~0ULL/*vcpu_index*/);
+            debug->stop_cycle++;
+            WakeAllConditionVariable(&debug->stop_cvar);
+        }
+
         WAITCOND(
-            instance->config.vcpu_count == debug->cont_count,
-            &debug->cont_cvar);
+            debug->is_continued,
+            &debug->wait_cvar);
 
-    is_debugged = debug->is_debugged;
-    single_step = debug->single_step && vcpu_index == debug->vcpu_index;
+        /*
+         * Interruptible barrier:
+         *
+         * - Terminate and debug detach events exit the barrier. Otherwise:
+         * - All threads must continue and the is_continued flag is cleared.
+         */
+        cont_cycle = debug->cont_cycle;
+        if (instance->config.vcpu_count > ++debug->cont_count)
+            WAITCOND(
+                cont_cycle != debug->cont_cycle,
+                &debug->cont_cvar);
+        else
+        {
+            debug->cont_count = 0;
+            debug->is_continued = 0;
+            if (0 != debug->events.handler)
+                debug->events.handler(debug->events.self, instance, VM_DEBUG_CONT, ~0ULL/*vcpu_index*/);
+            debug->cont_cycle++;
+            WakeAllConditionVariable(&debug->cont_cvar);
+        }
 
-skip_debug_event:
-    is_terminated = instance->is_terminated;
-    ReleaseSRWLockExclusive(&instance->thread_lock);
+        is_debugged = debug->is_debugged;
+        single_step = is_debugged && debug->single_step && vcpu_index == debug->vcpu_index;
+        other_single_step = is_debugged && debug->single_step && vcpu_index != debug->vcpu_index;
 
-    if (is_terminated)
-        return vm_result(VM_ERROR_TERMINATED, 0);
+    skip_debug_event:
+        is_terminated = instance->is_terminated;
+        ReleaseSRWLockExclusive(&instance->thread_lock);
 
-    return vm_vcpu_debug(instance, vcpu_index, is_debugged, single_step);
+        if (is_terminated)
+            return vm_result(VM_ERROR_TERMINATED, 0);
+
+        if (other_single_step)
+            continue;
+
+        *psingle_step = single_step;
+
+        return vm_vcpu_debug(instance, vcpu_index, is_debugged, single_step);
+    }
 
 #undef WAITCOND
 }
