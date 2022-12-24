@@ -124,6 +124,7 @@ static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
 static vm_result_t vm_thread_debug_event(vm_t *instance, unsigned vcpu_index, int vcpu_fd, int *psingle_step);
 static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
+static vm_result_t vm_vcpu_init_cpuid(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
 static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
@@ -1448,6 +1449,10 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
     struct kvm_regs regs;
     struct kvm_sregs sregs;
 
+    result = vm_vcpu_init_cpuid(instance, vcpu_index, vcpu_fd);
+    if (!vm_result_check(result))
+        goto exit;
+
     page = malloc(sizeof(struct arch_x64_cpu_data));
     if (0 == page)
     {
@@ -1558,6 +1563,43 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
 
 exit:
     free(page);
+
+    return result;
+#endif
+}
+
+static vm_result_t vm_vcpu_init_cpuid(vm_t *instance, unsigned vcpu_index, int vcpu_fd)
+{
+#if defined(__x86_64__)
+    vm_result_t result;
+    struct kvm_cpuid2 *cpuid2 = 0;
+    const __u32 max_nent = 100;
+
+    cpuid2 = malloc(sizeof *cpuid2 + max_nent * sizeof cpuid2->entries[0]);
+    if (0 == cpuid2)
+    {
+        result = vm_result(VM_ERROR_RESOURCES, 0);
+        goto exit;
+    }
+
+    cpuid2->nent = max_nent;
+
+    if (-1 == ioctl(instance->hv_fd, (int)KVM_GET_SUPPORTED_CPUID, cpuid2))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    if (-1 == ioctl(vcpu_fd, KVM_SET_CPUID2, cpuid2))
+    {
+        result = vm_result(VM_ERROR_VCPU, errno);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    free(cpuid2);
 
     return result;
 #endif
