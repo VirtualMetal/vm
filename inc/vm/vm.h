@@ -341,6 +341,12 @@ struct vm_debug_events
     void (*handler)(void *self, vm_t *instance, vm_count_t control, vm_count_t reserved);
 };
 
+typedef struct vm_debug_step_range vm_debug_step_range_t;
+struct vm_debug_step_range
+{
+    vm_count_t begin, end;
+};
+
 /**
  * Debug a VM instance.
  *
@@ -354,19 +360,17 @@ struct vm_debug_events
  *     One of the VM_DEBUG_* codes.
  * @param vcpu_index
  *     The virtual CPU index. This parameter is used only for the
- *     *REGS, *VMEM, and *BP codes.
+ *     STEP, *REGS, *VMEM, and *BP codes.
  * @param address
- *     The guest address. If the vcpu_index parameter is ~0ULL, this is
- *     interpretted as a physical address, else it is interpretted as a
- *     virtual address. This parameter is used only for the
+ *     The guest virtual address. This parameter is used only for the
  *     *VMEM, and *BP codes.
  * @param buffer
  *     The buffer to read/write into. This parameter is used only for the
- *     SETEVENTS, *REGS, and *VMEM codes.
+ *     SETEVENTS, STEP, *REGS, and *VMEM codes.
  * @param plength
  *     On input it contains the length of the buffer. On output it receives
  *     the number of bytes read/written. This parameter is used only for the
- *     SETEVENTS, *REGS, and *VMEM codes.
+ *     SETEVENTS, STEP, *REGS, and *VMEM codes.
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */

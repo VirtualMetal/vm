@@ -55,6 +55,7 @@ struct vm_mmap
 struct vm_debug
 {
     vm_debug_events_t events;
+    vm_debug_step_range_t step_range;
     CONDITION_VARIABLE stop_cvar, cont_cvar, wait_cvar;
         /* use condition variables for synchronization to streamline implementation across platforms */
     vm_count_t stop_cycle, stop_count, cont_cycle, cont_count;
@@ -66,7 +67,7 @@ struct vm_debug
         is_debugged:1,
         is_stopped:1,
         is_continued:1,
-        single_step:1,
+        is_stepping:1,
         stop_on_start:1;
 };
 
@@ -94,7 +95,9 @@ static vm_result_t vm_debug_internal(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
 static DWORD WINAPI vm_thread(PVOID instance0);
-static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOOL psingle_step);
+static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index);
+static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
+    WHV_RUN_VP_EXIT_CONTEXT *exit_context, PBOOL phas_debug_event);
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
@@ -830,6 +833,11 @@ static vm_result_t vm_debug_internal(vm_t *instance,
             result = vm_result(VM_ERROR_TERMINATED, 0);
             goto exit;
         }
+        if (VM_DEBUG_STEP == control && 0 != plength && sizeof(vm_debug_step_range_t) > *plength)
+        {
+            result = vm_result(VM_ERROR_MISUSE, 0);
+            goto exit;
+        }
         if (!debug->is_stopped)
             break;
 
@@ -839,7 +847,10 @@ static vm_result_t vm_debug_internal(vm_t *instance,
         {
             debug->is_continued = 1;
             debug->vcpu_index = vcpu_index;
-            debug->single_step = VM_DEBUG_STEP == control;
+            debug->is_stepping = VM_DEBUG_STEP == control;
+            debug->step_range = VM_DEBUG_STEP == control && 0 != plength ?
+                *(vm_debug_step_range_t *)buffer :
+                (vm_debug_step_range_t){ 0 };
             WakeAllConditionVariable(&debug->wait_cvar);
             while (!instance->is_terminated &&
                 debug->is_continued)
@@ -1023,7 +1034,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     vm_t *instance = instance0;
     UINT32 vcpu_index;
     BOOL has_vcpu = FALSE;
-    BOOL is_terminated, has_debug_event, single_step, has_debug_log;
+    BOOL is_terminated, has_debug_event, has_debug_log;
     HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
     HRESULT hresult;
@@ -1075,11 +1086,10 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     for (;;)
     {
-        single_step = FALSE;
         if (has_debug_event)
         {
             has_debug_event = FALSE;
-            result = vm_thread_debug_event(instance, vcpu_index, &single_step);
+            result = vm_thread_debug_event(instance, vcpu_index);
             if (!vm_result_check(result))
                 goto exit;
         }
@@ -1103,28 +1113,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             break;
 
         case WHvRunVpExitReasonException:
-#if defined(_M_X64)
-            if (WHvX64ExceptionTypeDebugTrapOrFault != exit_context.VpException.ExceptionType &&
-                WHvX64ExceptionTypeBreakpointTrap != exit_context.VpException.ExceptionType)
-#endif
-            {
-                result = vm_result(VM_ERROR_VCPU, 0);
-                break;
-            }
-            result = VM_RESULT_SUCCESS;
-            AcquireSRWLockExclusive(&instance->thread_lock);
-            if (0 != instance->debug && instance->debug->is_debugged)
-            {
-                instance->debug->stop_on_start = 1;
-                if (!single_step)
-                {
-                    for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
-                        if (index != vcpu_index)
-                            WHvCancelRunVirtualProcessor(instance->partition, index, 0);
-                }
-                has_debug_event = TRUE;
-            }
-            ReleaseSRWLockExclusive(&instance->thread_lock);
+            result = vm_thread_debug_exit(instance, vcpu_index, &exit_context, &has_debug_event);
             break;
 
         case WHvRunVpExitReasonX64Halt:
@@ -1180,7 +1169,7 @@ exit:
     return 0;
 }
 
-static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOOL psingle_step)
+static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index)
 {
 #define WAITCOND(cond, cvar)            \
     do                                  \
@@ -1195,7 +1184,7 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOO
     for (;;)
     {
         struct vm_debug *debug;
-        BOOL is_terminated = FALSE, is_debugged = FALSE, single_step = FALSE, other_single_step = FALSE;
+        BOOL is_terminated = FALSE, is_debugged = FALSE, is_stepping = FALSE, other_is_stepping = FALSE;
         vm_count_t stop_cycle, cont_cycle;
 
         AcquireSRWLockExclusive(&instance->thread_lock);
@@ -1250,8 +1239,8 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOO
         }
 
         is_debugged = debug->is_debugged;
-        single_step = is_debugged && debug->single_step && vcpu_index == debug->vcpu_index;
-        other_single_step = is_debugged && debug->single_step && vcpu_index != debug->vcpu_index;
+        is_stepping = is_debugged && debug->is_stepping && vcpu_index == debug->vcpu_index;
+        other_is_stepping = is_debugged && debug->is_stepping && vcpu_index != debug->vcpu_index;
 
     skip_debug_event:
         is_terminated = instance->is_terminated;
@@ -1260,15 +1249,74 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index, PBOO
         if (is_terminated)
             return vm_result(VM_ERROR_TERMINATED, 0);
 
-        if (other_single_step)
+        if (other_is_stepping)
             continue;
 
-        *psingle_step = single_step;
-
-        return vm_vcpu_debug(instance, vcpu_index, is_debugged, single_step);
+        return vm_vcpu_debug(instance, vcpu_index, is_debugged, is_stepping);
     }
 
 #undef WAITCOND
+}
+
+static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
+    WHV_RUN_VP_EXIT_CONTEXT *exit_context, PBOOL phas_debug_event)
+{
+    vm_result_t result;
+    struct vm_debug *debug;
+    BOOL has_debug_event, range_step;
+
+    *phas_debug_event = FALSE;
+
+#if defined(_M_X64)
+    if (WHvX64ExceptionTypeDebugTrapOrFault != exit_context->VpException.ExceptionType &&
+        WHvX64ExceptionTypeBreakpointTrap != exit_context->VpException.ExceptionType)
+#endif
+    {
+        result = vm_result(VM_ERROR_VCPU, 0);
+        goto exit;
+    }
+
+    AcquireSRWLockExclusive(&instance->thread_lock);
+
+    has_debug_event = range_step = FALSE;
+    if (0 != (debug = instance->debug) && debug->is_debugged)
+    {
+        debug->stop_on_start = 1;
+        if (debug->is_stepping)
+        {
+#if defined(_M_X64)
+            vm_count_t pc = exit_context->VpContext.Rip;
+#endif
+            range_step = debug->step_range.begin <= pc && pc < debug->step_range.end;
+            has_debug_event = !range_step;
+        }
+        else
+        {
+            for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
+                if (index != vcpu_index)
+                    WHvCancelRunVirtualProcessor(instance->partition, index, 0);
+            has_debug_event = TRUE;
+        }
+    }
+
+    ReleaseSRWLockExclusive(&instance->thread_lock);
+
+    if (range_step)
+    {
+        /*
+         * If we are range stepping do not report a debug event (has_debug_event == FALSE).
+         * Instead prepare the virtual CPU for another single step through the step range.
+         */
+        result = vm_vcpu_debug(instance, vcpu_index, TRUE, TRUE);
+        if (!vm_result_check(result))
+            goto exit;
+    }
+
+    *phas_debug_event = has_debug_event;
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
 }
 
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)

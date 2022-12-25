@@ -415,7 +415,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
         else
         if (0 == invariant_strncmp(packet + 1, "Supported", sizeof "Supported" - 1))
             result = vm_gdb_sendf(state,
-                "PacketSize=%d;QStartNoAckMode+;swbreak+;qXfer:features:read+",
+                "PacketSize=%d;QStartNoAckMode+;swbreak+;qXfer:features:read+;vContSupported+",
                 PACKET_SIZE);
         else
         if (0 == invariant_strncmp(packet + 1, "Xfer:features:read:", sizeof "Xfer:features:read:" - 1))
@@ -454,6 +454,64 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             state->noack = 1;
             result = vm_gdb_sendres(state, 1);
         }
+        else
+            goto unrecognized;
+        break;
+
+    case 'v': /* v-packets */
+        if (0 == invariant_strncmp(packet + 1, "Cont;", sizeof "Cont;" - 1))
+        {
+            /*
+             * We can only continue ALL threads and we can only step ONE thread.
+             * For this reason it is only necessary to look at the leftmost vCont command
+             * and ignore the rest.
+             */
+            p = packet + sizeof "Cont;";
+
+            /* initialize scratch variables */
+            address = length = 0;
+
+            switch (*p)
+            {
+            case 'c': /* continue */
+            case 'C': /* continue with signal */
+                vm_debug(state->instance, VM_DEBUG_CONT, 0, 0, 0, 0);
+                break;
+
+            case 'r': /* range step */
+                address = strtoullint(p + 1, &p, 16);
+                if (',' == *p)
+                    length = strtoullint(p + 1, &p, 16);
+                /* fallthrough; `address` contains range start, `length` contains range end */
+
+            case 's': /* step */
+            case 'S': /* step with signal */
+                {
+                    for (; *p && ':' != *p && ';' != *p; p++)
+                        ;
+                    int ctid = -1;
+                    if (':' == *p)
+                        ctid = (int)strtoullint(p + 1, 0, -16);
+                    if (0 >= ctid)
+                        /* we can only continue ALL threads and we can only step ONE thread */
+                        ctid = 1;
+                    if (ctid > state->instance->config.vcpu_count)
+                        goto vCont_error;
+                    vm_debug_step_range_t range = { .begin = address, .end = length };
+                    length = sizeof range;
+                    vm_debug(state->instance, VM_DEBUG_STEP, (vm_count_t)(ctid - 1), 0, &range, &length);
+                }
+                break;
+
+            default:
+            vCont_error:
+                result = vm_gdb_sendres(state, 0);
+                break;
+            }
+        }
+        else if (0 == invariant_strncmp(packet + 1, "Cont?", sizeof "Cont?" - 1))
+            result = vm_gdb_sendf(state,
+                "vCont;c;C;s;S;r");
         else
             goto unrecognized;
         break;
