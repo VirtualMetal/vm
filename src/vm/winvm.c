@@ -1268,8 +1268,10 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
     *phas_debug_event = FALSE;
 
 #if defined(_M_X64)
-    if (WHvX64ExceptionTypeDebugTrapOrFault != exit_context->VpException.ExceptionType &&
-        WHvX64ExceptionTypeBreakpointTrap != exit_context->VpException.ExceptionType)
+    vm_count_t pc = exit_context->VpContext.Rip;
+    BOOL is_db_ex = WHvX64ExceptionTypeDebugTrapOrFault == exit_context->VpException.ExceptionType;
+    BOOL is_bp_ex = WHvX64ExceptionTypeBreakpointTrap == exit_context->VpException.ExceptionType;
+    if (!is_db_ex && !is_bp_ex)
 #endif
     {
         result = vm_result(VM_ERROR_VCPU, 0);
@@ -1282,11 +1284,8 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
     if (0 != (debug = instance->debug) && debug->is_debugged)
     {
         debug->stop_on_start = 1;
-        if (debug->is_stepping)
+        if (is_db_ex && debug->is_stepping)
         {
-#if defined(_M_X64)
-            vm_count_t pc = exit_context->VpContext.Rip;
-#endif
             range_step = debug->step_range.begin <= pc && pc < debug->step_range.end;
             has_debug_event = !range_step;
         }

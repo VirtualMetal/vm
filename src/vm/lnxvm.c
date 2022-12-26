@@ -1441,17 +1441,25 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, unsigned vcpu_index, int
 
     *phas_debug_event = 0;
 
+#if defined(__x86_64__)
+    vm_count_t pc = vcpu_run->debug.arch.pc;
+    int is_db_ex = 1 == vcpu_run->debug.arch.exception;
+    int is_bp_ex = 3 == vcpu_run->debug.arch.exception;
+    if (!is_db_ex && !is_bp_ex)
+#endif
+    {
+        result = vm_result(VM_ERROR_VCPU, 0);
+        goto exit;
+    }
+
     pthread_mutex_lock(&instance->thread_lock);
 
     has_debug_event = range_step = 0;
     if (0 != (debug = instance->debug) && debug->is_debugged)
     {
         debug->stop_on_start = 1;
-        if (debug->is_stepping)
+        if (is_db_ex && debug->is_stepping)
         {
-#if defined(__x86_64__)
-            vm_count_t pc = vcpu_run->debug.arch.pc;
-#endif
             range_step = debug->step_range.begin <= pc && pc < debug->step_range.end;
             has_debug_event = !range_step;
         }
