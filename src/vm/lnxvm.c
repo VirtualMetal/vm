@@ -80,7 +80,8 @@ struct vm_debug
     vm_count_t stop_cycle, stop_count, cont_cycle, cont_count;
     vm_count_t vcpu_index;
     vm_count_t bp_count;
-    vm_count_t bp_address[64];
+    vm_count_t bp_ident[64];
+    vm_count_t bp_paddr[64];
     uint32_t bp_value[64];
     unsigned
         is_debugged:1,
@@ -864,7 +865,7 @@ static vm_result_t vm_debug_internal(vm_t *instance,
         debug->events = (vm_debug_events_t){ 0 };
 
         for (vm_count_t index = debug->bp_count - 1; debug->bp_count > index; index--)
-            vm_debug_internal(instance, VM_DEBUG_DELBP, ~0ULL, debug->bp_address[index], 0, 0);
+            vm_debug_internal(instance, VM_DEBUG_DELBP, ~0ULL, debug->bp_paddr[index], 0, 0);
 
         debug->is_debugged = 0;
         vm_debug_internal(instance, VM_DEBUG_CONT, 0, 0, 0, 0);
@@ -1032,26 +1033,40 @@ static vm_result_t vm_debug_internal(vm_t *instance,
         }
 
         {
-            vm_count_t bp_address;
-            vm_count_t index;
+            vm_count_t bp_ident, bp_paddr, index;
 #if defined(__x86_64__)
             uint32_t bp_value = 0, bp_instr = 0xcc/* INT3 instruction */;
             vm_count_t bp_length, bp_expected = 1;
 #endif
 
-            if (~0ULL != vcpu_index)
+            bp_ident = bp_paddr = address;
+
+            if (VM_DEBUG_SETBP == control && ~0ULL != vcpu_index)
             {
                 result = vm_vcpu_translate(instance,
-                    instance->debug_thread_data[vcpu_index].vcpu_fd, address, &bp_address);
+                    instance->debug_thread_data[vcpu_index].vcpu_fd, address, &bp_paddr);
                 if (!vm_result_check(result))
                     goto exit;
             }
-            else
-                bp_address = address;
 
-            for (index = 0; debug->bp_count > index; index++)
-                if (debug->bp_address[index] == bp_address)
-                    break;
+            if (~0ULL != vcpu_index)
+            {
+                for (index = 0; debug->bp_count > index; index++)
+                    if (debug->bp_ident[index] == bp_ident)
+                        break;
+            }
+            else
+            {
+                for (index = 0; debug->bp_count > index; index++)
+                    if (debug->bp_paddr[index] == bp_paddr)
+                        break;
+            }
+
+            if (debug->bp_count > index)
+            {
+                bp_ident = debug->bp_ident[index];
+                bp_paddr = debug->bp_paddr[index];
+            }
 
             /*
              * If we are setting a breakpoint and we already have one at the specified address
@@ -1063,28 +1078,29 @@ static vm_result_t vm_debug_internal(vm_t *instance,
 
             if (VM_DEBUG_SETBP == control && debug->bp_count <= index)
             {
-                if (sizeof debug->bp_address / sizeof debug->bp_address[0] <= debug->bp_count)
+                if (sizeof debug->bp_ident / sizeof debug->bp_ident[0] <= debug->bp_count)
                 {
                     result = vm_result(VM_ERROR_MISUSE, 0);
                     goto exit;
                 }
 
                 bp_length = bp_expected;
-                vm_mread(instance, bp_address, &bp_value, &bp_length);
+                vm_mread(instance, bp_paddr, &bp_value, &bp_length);
                 if (bp_length != bp_expected)
                 {
                     result = vm_result(VM_ERROR_MEMORY, 0);
                     goto exit;
                 }
 
-                vm_mwrite(instance, &bp_instr, bp_address, &bp_length);
+                vm_mwrite(instance, &bp_instr, bp_paddr, &bp_length);
                 if (bp_length != bp_expected)
                 {
                     result = vm_result(VM_ERROR_MEMORY, 0);
                     goto exit;
                 }
 
-                debug->bp_address[debug->bp_count] = bp_address;
+                debug->bp_ident[debug->bp_count] = bp_ident;
+                debug->bp_paddr[debug->bp_count] = bp_paddr;
                 debug->bp_value[debug->bp_count] = bp_value;
                 debug->bp_count++;
             }
@@ -1092,7 +1108,7 @@ static vm_result_t vm_debug_internal(vm_t *instance,
             if (VM_DEBUG_DELBP == control && debug->bp_count > index)
             {
                 bp_length = bp_expected;
-                vm_mread(instance, bp_address, &bp_value, &bp_length);
+                vm_mread(instance, bp_paddr, &bp_value, &bp_length);
                 if (bp_length != bp_expected)
                 {
                     result = vm_result(VM_ERROR_MEMORY, 0);
@@ -1102,7 +1118,7 @@ static vm_result_t vm_debug_internal(vm_t *instance,
                 if (bp_value == bp_instr)
                 {
                     /* only restore original value, if it still contains the breakpoint instruction */
-                    vm_mwrite(instance, &debug->bp_value[index], bp_address, &bp_length);
+                    vm_mwrite(instance, &debug->bp_value[index], bp_paddr, &bp_length);
                     if (bp_length != bp_expected)
                     {
                         result = vm_result(VM_ERROR_MEMORY, 0);
@@ -1110,8 +1126,10 @@ static vm_result_t vm_debug_internal(vm_t *instance,
                     }
                 }
 
-                memmove(debug->bp_address + index, debug->bp_address + index + 1,
-                    (debug->bp_count - index - 1) * sizeof debug->bp_address[0]);
+                memmove(debug->bp_ident + index, debug->bp_ident + index + 1,
+                    (debug->bp_count - index - 1) * sizeof debug->bp_ident[0]);
+                memmove(debug->bp_paddr + index, debug->bp_paddr + index + 1,
+                    (debug->bp_count - index - 1) * sizeof debug->bp_paddr[0]);
                 memmove(debug->bp_value + index, debug->bp_value + index + 1,
                     (debug->bp_count - index - 1) * sizeof debug->bp_value[0]);
                 debug->bp_count--;
