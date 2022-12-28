@@ -1,4 +1,4 @@
-# Text Configuration Format
+# VirtualMetal Text Configuration Format
 
 # A configuration file consists of lines ending with LF or CRLF.
 # A line that is blank or starts with a # is ignored.
@@ -10,7 +10,7 @@
 # A <name>=<value> pair is a configuration command with form:
 #<name>=<value>
 
-# A path is an command to include the file contents with form:
+# A path is a command to include the file contents with form:
 #/path/to/file
 #./path/to/file
 #../path/to/file
