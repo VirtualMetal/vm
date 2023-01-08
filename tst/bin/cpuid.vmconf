@@ -1,0 +1,5 @@
+exec=0,0x10000000,cpuid.elf
+pg0=0x0000
+pg1=0x1003
+pg2=0x0083,512
+vcpu_table=0x2000
