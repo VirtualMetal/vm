@@ -1761,7 +1761,7 @@ static void vm_log_mmap(vm_t *instance)
     list_traverse(link, prev, &instance->mmap_list)
     {
         vm_mmap_t *map = (vm_mmap_t *)link;
-        UINT64 length;
+        UINT64 length, end_address;
         char pathbuf[1024], *path = 0;
 
         if (0 != map->file_alloc)
@@ -1774,9 +1774,11 @@ static void vm_log_mmap(vm_t *instance)
             }
 
         length = map->head_length + map->tail_length;
-        instance->config.logf("mmap %08x%08x %08x%08x%s%s",
+        end_address = map->guest_address + length - 1;
+        instance->config.logf("mmap %08x%08x-%08x%08x %7uK%s%s",
             (UINT32)(map->guest_address >> 32), (UINT32)map->guest_address,
-            (UINT32)(length >> 32), (UINT32)length,
+            (UINT32)(end_address >> 32), (UINT32)end_address,
+            (UINT32)(length >> 10),
             path ? " " : "", path ? path : "");
     }
 

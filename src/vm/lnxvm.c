@@ -1967,6 +1967,7 @@ skip_maps:
     list_traverse(link, prev, &instance->mmap_list)
     {
         vm_mmap_t *map = (vm_mmap_t *)link;
+        uint64_t end_address;
         char *path = 0;
 
         for (size_t i = 0; mmap_path_count > i; i++)
@@ -1977,9 +1978,11 @@ skip_maps:
                 break;
             }
 
-        instance->config.logf("mmap %08x%08x %08x%08x%s%s",
+        end_address = map->guest_address + map->region_length - 1;
+        instance->config.logf("mmap %08x%08x-%08x%08x %7uK%s%s",
             (uint32_t)(map->guest_address >> 32), (uint32_t)map->guest_address,
-            (uint32_t)(map->region_length >> 32), (uint32_t)map->region_length,
+            (uint32_t)(end_address >> 32), (uint32_t)end_address,
+            (uint32_t)(map->region_length >> 10),
             path ? " " : "", path ? path : "");
     }
 
