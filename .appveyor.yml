@@ -1,0 +1,22 @@
+version: '{build}'
+
+image: Visual Studio 2022
+
+environment:
+  matrix:
+  - Configuration: Debug
+  - Configuration: Release
+
+install:
+- ps: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All
+- wsl sudo apt-get -qy update
+- wsl sudo apt-get -qy install g++ gdb make ninja-build rsync zip
+
+build_script:
+- '"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\devenv.com" build\VStudio\VirtualMetal.sln /build "%Configuration%|x64"'
+
+test_script:
+# AppVeyor Server 2019 Hypervisor platform reports support for ExtendedVmExits via WHvGetCapability
+# but returns E_INVALIDARG when attempting to WHvSetPartitionProperty. For this reason we disable
+# the debugging tests.
+- build\VStudio\build\%Configuration%\vm-tests.exe -vm_debug*
