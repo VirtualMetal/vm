@@ -122,7 +122,7 @@ static void vm_gdb_events_handler(void *self, vm_t *instance, vm_count_t control
 #if defined(_WIN64)
         if (InterlockedCompareExchange(&state->is_sendstop_enabled, 0, 1))
 #else
-        int expected = 1;
+        ; int expected = 1;
         if (atomic_compare_exchange_strong(&state->is_sendstop_enabled, &expected, 0))
 #endif
             vm_gdb_sendstop_oob(state, 5);
