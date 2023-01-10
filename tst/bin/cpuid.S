@@ -10,41 +10,41 @@
 .global _start
 _start:
 
-    mov eax,0
+    mov eax,0                           // request basic CPUID information
+    mov esi,eax
     cpuid
-    mov esi,0
-    mov edi,eax
+    mov edi,eax                         // maximum input for basic CPUID information
 loop_00000000:
     mov eax,esi
     cpuid
 _00000000:
-    nop
+    nop                                 // dprintf _00000000
     inc esi
     cmp esi,edi
     jbe loop_00000000
 
-    mov eax,0x40000000
+    mov eax,0x40000000                  // request hypervisor CPUID information
+    mov esi,eax
     cpuid
-    mov esi,0x40000000
-    mov edi,eax
+    mov edi,eax                         // maximum input for hypervisor CPUID information
 loop_40000000:
     mov eax,esi
     cpuid
 _40000000:
-    nop
+    nop                                 // dprintf _40000000
     inc esi
     cmp esi,edi
     jbe loop_40000000
 
-    mov eax,0x80000000
+    mov eax,0x80000000                  // request extended CPUID information
+    mov esi,eax
     cpuid
-    mov esi,0x80000000
-    mov edi,eax
+    mov edi,eax                         // maximum input for extended CPUID information
 loop_80000000:
     mov eax,esi
     cpuid
 _80000000:
-    nop
+    nop                                 // dprintf _80000000
     inc esi
     cmp esi,edi
     jbe loop_80000000
