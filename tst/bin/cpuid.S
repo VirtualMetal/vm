@@ -16,6 +16,7 @@ _start:
     mov edi,eax                         // maximum input for basic CPUID information
 loop_00000000:
     mov eax,esi
+    xor ecx,ecx
     cpuid
 _00000000:
     nop                                 // dprintf _00000000
@@ -29,6 +30,7 @@ _00000000:
     mov edi,eax                         // maximum input for hypervisor CPUID information
 loop_40000000:
     mov eax,esi
+    xor ecx,ecx
     cpuid
 _40000000:
     nop                                 // dprintf _40000000
@@ -42,6 +44,7 @@ _40000000:
     mov edi,eax                         // maximum input for extended CPUID information
 loop_80000000:
     mov eax,esi
+    xor ecx,ecx
     cpuid
 _80000000:
     nop                                 // dprintf _80000000
