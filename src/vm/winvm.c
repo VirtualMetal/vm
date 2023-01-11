@@ -117,11 +117,13 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0);
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength);
 
 #if defined(_M_X64)
-static WHV_X64_CPUID_RESULT2 vm_vcpu_cpuid_results[1] =
+static WHV_X64_CPUID_RESULT2 vm_vcpu_cpuid_results[] =
 {
-    [0] = { .Function = 1, .Output.Ecx = 0x80000000, .Mask.Ecx = 0x80000000 /* hypervisor present */},
+    { .Function = 1, .Output.Ecx = 0x80000000, .Mask.Ecx = 0x80000000 /* hypervisor present */},
 };
+#endif
 
+#if defined(_M_X64)
 /*
  * Register convenience macros
  *
