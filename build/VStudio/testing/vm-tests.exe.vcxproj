@@ -16,6 +16,7 @@
     <ClInclude Include="..\..\..\src\arch\x64.h" />
     <ClInclude Include="..\..\..\src\tlib\testsuite.h" />
     <ClInclude Include="..\..\..\src\vm\internal.h" />
+    <ClInclude Include="..\..\..\tst\vm-tests\vm-tests.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\tlib\testsuite.c" />

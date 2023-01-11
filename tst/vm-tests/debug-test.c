@@ -11,8 +11,7 @@
  * Software Foundation.
  */
 
-#include <vm/internal.h>
-#include <tlib/testsuite.h>
+#include "vm-tests.h"
 
 static void vm_debug_test(void)
 {
@@ -376,11 +375,70 @@ static void vm_debug_server_test(void)
     ASSERT(vm_result_check(result));
 }
 
+static void vm_debug_cpuid_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    char *tconfigv[] =
+    {
+        "mmap=0,0x10000",
+        "pg0=0x1000",
+        "pg1=0x2003",
+        "pg2=0x0083,512",
+        "vcpu_table=0x3000",
+        "vcpu_entry=0x0000",
+        "debug_break=1",
+        "data=0,8,0xb8,0x01,0x00,0x00,0x00,0x0f,0xa2,0xf4",
+        0,
+    };
+    vm_t *instance;
+    char regs[1024];
+    vm_count_t regl;
+
+    memset(&config, 0, sizeof config);
+    config.vcpu_count = 1;
+
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_SETBP, 0, 7, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_CONT, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_DELBP, 0, 7, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    regl = sizeof regs;
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
+    ASSERT(vm_result_check(result));
+
+    /* assert rip == 7 */
+    ASSERT(regs[128] == 7);
+
+    /* assert (rcx & 0x80000000); hypervisor present */
+    ASSERT(regs[19] & 0x80);
+
+    result = vm_debug(instance, VM_DEBUG_DETACH, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_wait(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_delete(instance);
+    ASSERT(vm_result_check(result));
+}
+
 void debug_tests(void)
 {
     TEST(vm_debug_test);
     TEST(vm_debug_mp_test);
     TEST(vm_debug_bp_test);
     TEST(vm_debug_range_test);
+    TEST(vm_debug_cpuid_test);
     TEST(vm_debug_server_test);
 }

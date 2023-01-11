@@ -53,8 +53,9 @@ struct vm_config
     /* immutable */
     void (*logf)(const char *format, ...);
     vm_count_t log_flags;
+    vm_count_t compat_flags;
     vm_count_t vcpu_count;              /* number of virtual cpu's */
-    vm_count_t reserved0[5];
+    vm_count_t reserved0[4];
 
     /* reconfigurable */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
@@ -72,6 +73,8 @@ struct vm_config
 
 #define VM_CONFIG_LOG_HYPERVISOR        1
 #define VM_CONFIG_LOG_DEBUGSERVER       0x80000000
+
+#define VM_CONFIG_COMPAT_WHV_DEBUG      0x80000000
 
 /**
  * Run a VM instance with the specified text configuration.

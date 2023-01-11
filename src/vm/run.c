@@ -78,6 +78,12 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             CHK('\0' == *p);
         }
         else
+        if (CMD("compat_flags"))
+        {
+            config.compat_flags = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
+        else
         if (CMD("vcpu_count"))
         {
             config.vcpu_count = strtoullint(p, &p, +1);

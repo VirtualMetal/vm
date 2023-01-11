@@ -11,8 +11,7 @@
  * Software Foundation.
  */
 
-#include <vm/internal.h>
-#include <tlib/testsuite.h>
+#include "vm-tests.h"
 
 int main(int argc, char **argv)
 {

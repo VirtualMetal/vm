@@ -36,6 +36,9 @@
     <ClInclude Include="..\..\..\inc\vm\vm.h">
       <Filter>Include\vm</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\tst\vm-tests\vm-tests.h">
+      <Filter>Source</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\tlib\testsuite.c">

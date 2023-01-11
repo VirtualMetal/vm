@@ -18,6 +18,7 @@ struct vm
 {
     vm_config_t config;                 /* must be first */
     WHV_PARTITION_HANDLE partition;
+    WHV_EXTENDED_VM_EXITS extended_vm_exits;    /* immutable */
     SRWLOCK mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
     SRWLOCK vm_start_lock;              /* vm_start/vm_wait serialization lock */
@@ -30,6 +31,7 @@ struct vm
     vm_result_t thread_result;
     unsigned
         is_terminated:1,                /* protected by thread_lock */
+        has_settable_whv_properties,    /* immutable */
         is_debuggable:1;                /* immutable */
     SRWLOCK vm_debug_lock;              /* vm_debug serialization lock */
     struct vm_debug *debug;             /* protected by thread_lock */
@@ -100,6 +102,8 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
     WHV_RUN_VP_EXIT_CONTEXT *exit_context, PBOOL phas_debug_event);
 static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
+static vm_result_t vm_vcpu_cpuid_exit(vm_t *instance, UINT32 vcpu_index,
+    WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
@@ -113,6 +117,11 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0);
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength);
 
 #if defined(_M_X64)
+static WHV_X64_CPUID_RESULT2 vm_vcpu_cpuid_results[1] =
+{
+    [0] = { .Function = 1, .Output.Ecx = 0x80000000, .Mask.Ecx = 0x80000000 /* hypervisor present */},
+};
+
 /*
  * Register convenience macros
  *
@@ -135,8 +144,11 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     vm_result_t result;
     vm_t *instance = 0;
     vm_count_t vcpu_count;
-    WHV_PARTITION_PROPERTY property;
-    WHV_CAPABILITY capability;
+    BOOL hypervisor_present;
+    WHV_EXTENDED_VM_EXITS extended_vm_exits;
+    UINT32 processor_count;
+    UINT32 cpuid_exits[sizeof vm_vcpu_cpuid_results / sizeof vm_vcpu_cpuid_results[0]];
+    UINT64 exception_exit_bitmap;
     HRESULT hresult;
 
     *pinstance = 0;
@@ -157,8 +169,16 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         vcpu_count = 1;
 
     hresult = WHvGetCapability(
-        WHvCapabilityCodeHypervisorPresent, &capability, sizeof capability, 0);
-    if (FAILED(hresult) || !capability.HypervisorPresent)
+        WHvCapabilityCodeHypervisorPresent, &hypervisor_present, sizeof hypervisor_present, 0);
+    if (FAILED(hresult) || !hypervisor_present)
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+        goto exit;
+    }
+
+    hresult = WHvGetCapability(
+        WHvCapabilityCodeExtendedVmExits, &extended_vm_exits, sizeof extended_vm_exits, 0);
+    if (FAILED(hresult))
     {
         result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
@@ -180,15 +200,21 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     InitializeSRWLock(&instance->thread_lock);
     InitializeSRWLock(&instance->vm_debug_lock);
     InitializeSRWLock(&instance->debug_server_lock);
-
-    hresult = WHvGetCapability(
-        WHvCapabilityCodeExtendedVmExits, &capability, sizeof capability, 0);
-    if (FAILED(hresult))
-    {
-        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
-        goto exit;
-    }
-    instance->is_debuggable = !!capability.ExtendedVmExits.ExceptionExit;
+#if defined(_M_X64)
+    /*
+     * According to the documentation WHvSetPartitionProperty works after
+     * WHvSetupPartition (for specific properties) in builds 19H2 and above.
+     *
+     * The documentation for WHvGetCapability also states that X64RdtscExit
+     * is supported in builds 19H2 and above. So abuse this bit to determine
+     * if we are on 19H2 and above and can use WHvSetPartitionProperty after
+     * WHvSetupPartition.
+     */
+    instance->has_settable_whv_properties = !!extended_vm_exits.X64RdtscExit;
+#else
+    instance->has_settable_whv_properties = 1;
+#endif
+    instance->is_debuggable = !!extended_vm_exits.ExceptionExit;
 
     hresult = WHvCreatePartition(&instance->partition);
     if (FAILED(hresult))
@@ -197,14 +223,77 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
-    memset(&property, 0, sizeof property);
-    property.ProcessorCount = (UINT32)instance->config.vcpu_count;
+    processor_count = (UINT32)instance->config.vcpu_count;
     hresult = WHvSetPartitionProperty(instance->partition,
-        WHvPartitionPropertyCodeProcessorCount, &property, sizeof property);
+        WHvPartitionPropertyCodeProcessorCount, &processor_count, sizeof processor_count);
     if (FAILED(hresult))
     {
         result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
+    }
+
+#if defined(_M_X64)
+    hresult = WHvSetPartitionProperty(instance->partition,
+        WHvPartitionPropertyCodeCpuidResultList2, &vm_vcpu_cpuid_results, sizeof vm_vcpu_cpuid_results);
+    if (FAILED(hresult))
+    {
+        if (WHV_E_UNKNOWN_PROPERTY != hresult)
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+
+        /* CpuidResultList2 not supported: fall back to CpuidExit method */
+        if (!extended_vm_exits.X64CpuidExit)
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, 0);
+            goto exit;
+        }
+
+        for (vm_count_t i = 0; sizeof vm_vcpu_cpuid_results / sizeof vm_vcpu_cpuid_results[0] > i; i++)
+            cpuid_exits[i] = vm_vcpu_cpuid_results[i].Function;
+
+        hresult = WHvSetPartitionProperty(instance->partition,
+            WHvPartitionPropertyCodeCpuidExitList, cpuid_exits, sizeof cpuid_exits);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+
+        instance->extended_vm_exits.X64CpuidExit = 1;
+    }
+#endif
+
+    if (!instance->has_settable_whv_properties &&
+        instance->is_debuggable &&
+        (instance->config.compat_flags & VM_CONFIG_COMPAT_WHV_DEBUG))
+        instance->extended_vm_exits.ExceptionExit = 1;
+
+    if (0 != instance->extended_vm_exits.AsUINT64)
+    {
+        hresult = WHvSetPartitionProperty(instance->partition, WHvPartitionPropertyCodeExtendedVmExits,
+            &instance->extended_vm_exits, sizeof instance->extended_vm_exits);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+    }
+
+    if (!instance->has_settable_whv_properties &&
+        instance->is_debuggable &&
+        (instance->config.compat_flags & VM_CONFIG_COMPAT_WHV_DEBUG))
+    {
+        exception_exit_bitmap =
+            (1 << WHvX64ExceptionTypeDebugTrapOrFault) | (1 << WHvX64ExceptionTypeBreakpointTrap);
+        hresult = WHvSetPartitionProperty(instance->partition,
+            WHvPartitionPropertyCodeExceptionExitBitmap, &exception_exit_bitmap, sizeof exception_exit_bitmap);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
     }
 
     hresult = WHvSetupPartition(instance->partition);
@@ -1130,6 +1219,12 @@ static DWORD WINAPI vm_thread(PVOID instance0)
             result = vm_result(VM_ERROR_VCPU, 0);
             break;
 
+#if defined(_M_X64)
+        case WHvRunVpExitReasonX64Cpuid:
+            result = vm_vcpu_cpuid_exit(instance, vcpu_index, &exit_context);
+            break;
+#endif
+
         case WHvRunVpExitReasonException:
             result = vm_thread_debug_exit(instance, vcpu_index, &exit_context, &has_debug_event);
             break;
@@ -1475,44 +1570,98 @@ exit:
 #endif
 }
 
+
+static vm_result_t vm_vcpu_cpuid_exit(vm_t *instance, UINT32 vcpu_index,
+    WHV_RUN_VP_EXIT_CONTEXT *exit_context)
+{
+#if defined(_M_X64)
+    vm_result_t result;
+    WHV_REGISTER_NAME regn[128];
+    WHV_REGISTER_VALUE regv[128];
+    UINT32 regc;
+    HRESULT hresult;
+
+    for (vm_count_t i = 0; sizeof vm_vcpu_cpuid_results / sizeof vm_vcpu_cpuid_results[0] > i; i++)
+        if (exit_context->CpuidAccess.Rax == vm_vcpu_cpuid_results[i].Function)
+        {
+            exit_context->CpuidAccess.DefaultResultRax &= ~vm_vcpu_cpuid_results[i].Mask.Eax;
+            exit_context->CpuidAccess.DefaultResultRax |= vm_vcpu_cpuid_results[i].Output.Eax;
+
+            exit_context->CpuidAccess.DefaultResultRbx &= ~vm_vcpu_cpuid_results[i].Mask.Ebx;
+            exit_context->CpuidAccess.DefaultResultRbx |= vm_vcpu_cpuid_results[i].Output.Ebx;
+
+            exit_context->CpuidAccess.DefaultResultRcx &= ~vm_vcpu_cpuid_results[i].Mask.Ecx;
+            exit_context->CpuidAccess.DefaultResultRcx |= vm_vcpu_cpuid_results[i].Output.Ecx;
+
+            exit_context->CpuidAccess.DefaultResultRdx &= ~vm_vcpu_cpuid_results[i].Mask.Edx;
+            exit_context->CpuidAccess.DefaultResultRdx |= vm_vcpu_cpuid_results[i].Output.Edx;
+        }
+
+    regc = 0;
+    REGSET(Rax) = REGVAL(exit_context->CpuidAccess.DefaultResultRax);
+    REGSET(Rbx) = REGVAL(exit_context->CpuidAccess.DefaultResultRbx);
+    REGSET(Rcx) = REGVAL(exit_context->CpuidAccess.DefaultResultRcx);
+    REGSET(Rdx) = REGVAL(exit_context->CpuidAccess.DefaultResultRdx);
+    REGSET(Rip) = REGVAL(exit_context->VpContext.Rip + exit_context->VpContext.InstructionLength);
+
+    hresult = WHvSetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, regn, regc, regv);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+#endif
+}
+
 static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step)
 {
 #if defined(_M_X64)
     vm_result_t result;
-    WHV_PARTITION_PROPERTY property;
+    WHV_EXTENDED_VM_EXITS extended_vm_exits;
+    UINT64 exception_exit_bitmap;
     WHV_REGISTER_NAME regn[1];
     WHV_REGISTER_VALUE regv[1];
     UINT32 regc;
     UINT64 rflags;
     HRESULT hresult;
 
-    AcquireSRWLockExclusive(&instance->thread_lock);
-    if (( enable && 0 == instance->debug_enable_count++) ||
-        (!enable && 1 == instance->debug_enable_count--))
+    if (instance->has_settable_whv_properties)
     {
-        memset(&property, 0, sizeof property);
-        property.ExtendedVmExits.ExceptionExit = !!enable;
-        hresult = WHvSetPartitionProperty(instance->partition,
-            WHvPartitionPropertyCodeExtendedVmExits, &property, sizeof property);
-        if (FAILED(hresult))
+        AcquireSRWLockExclusive(&instance->thread_lock);
+        if (( enable && 0 == instance->debug_enable_count++) ||
+            (!enable && 1 == instance->debug_enable_count--))
         {
-            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
-            goto exit;
-        }
+            extended_vm_exits = instance->extended_vm_exits;
+            extended_vm_exits.ExceptionExit = !!enable;
+            hresult = WHvSetPartitionProperty(instance->partition,
+                WHvPartitionPropertyCodeExtendedVmExits, &extended_vm_exits, sizeof extended_vm_exits);
+            if (FAILED(hresult))
+            {
+                ReleaseSRWLockExclusive(&instance->thread_lock);
+                result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+                goto exit;
+            }
 
-        memset(&property, 0, sizeof property);
-        property.ExceptionExitBitmap = enable ?
-            (1 << WHvX64ExceptionTypeDebugTrapOrFault) | (1 << WHvX64ExceptionTypeBreakpointTrap) :
-            0;
-        hresult = WHvSetPartitionProperty(instance->partition,
-            WHvPartitionPropertyCodeExceptionExitBitmap, &property, sizeof property);
-        if (FAILED(hresult))
-        {
-            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
-            goto exit;
+            exception_exit_bitmap = enable ?
+                (1 << WHvX64ExceptionTypeDebugTrapOrFault) | (1 << WHvX64ExceptionTypeBreakpointTrap) :
+                0;
+            hresult = WHvSetPartitionProperty(instance->partition,
+                WHvPartitionPropertyCodeExceptionExitBitmap, &exception_exit_bitmap, sizeof exception_exit_bitmap);
+            if (FAILED(hresult))
+            {
+                ReleaseSRWLockExclusive(&instance->thread_lock);
+                result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+                goto exit;
+            }
         }
+        ReleaseSRWLockExclusive(&instance->thread_lock);
     }
-    ReleaseSRWLockExclusive(&instance->thread_lock);
 
     regc = 0;
     REGNAM(Rflags);

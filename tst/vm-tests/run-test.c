@@ -11,8 +11,7 @@
  * Software Foundation.
  */
 
-#include <vm/internal.h>
-#include <tlib/testsuite.h>
+#include "vm-tests.h"
 
 static void vm_create_delete_test(void)
 {
