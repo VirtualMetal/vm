@@ -1645,25 +1645,35 @@ static vm_result_t vm_vcpu_init_cpuid(vm_t *instance, unsigned vcpu_index, int v
 {
 #if defined(__x86_64__)
     vm_result_t result;
-    struct kvm_cpuid2 *cpuid2 = 0;
-    const __u32 max_nent = 100;
+    struct kvm_cpuid2 *cpuid_info = 0;
+    const __u32 max_nent = 256;
 
-    cpuid2 = malloc(sizeof *cpuid2 + max_nent * sizeof cpuid2->entries[0]);
-    if (0 == cpuid2)
+    cpuid_info = malloc(sizeof *cpuid_info + max_nent * sizeof cpuid_info->entries[0]);
+    if (0 == cpuid_info)
     {
         result = vm_result(VM_ERROR_RESOURCES, 0);
         goto exit;
     }
 
-    cpuid2->nent = max_nent;
+    cpuid_info->nent = max_nent;
 
-    if (-1 == ioctl(instance->hv_fd, (int)KVM_GET_SUPPORTED_CPUID, cpuid2))
+    if (-1 == ioctl(instance->hv_fd, (int)KVM_GET_SUPPORTED_CPUID, cpuid_info))
     {
         result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
     }
 
-    if (-1 == ioctl(vcpu_fd, KVM_SET_CPUID2, cpuid2))
+    for (__u32 i = 0; cpuid_info->nent > i; i++)
+        switch (cpuid_info->entries[i].function)
+        {
+        case 0x00000001:
+            cpuid_info->entries[i].ebx = (vcpu_index << 24) |
+                (cpuid_info->entries[i].ebx & 0x00ffffff);  /* fix LAPIC ID */
+            cpuid_info->entries[i].ecx |= 0x80000000;       /* hypervisor present */
+            break;
+        }
+
+    if (-1 == ioctl(vcpu_fd, KVM_SET_CPUID2, cpuid_info))
     {
         result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
@@ -1672,7 +1682,7 @@ static vm_result_t vm_vcpu_init_cpuid(vm_t *instance, unsigned vcpu_index, int v
     result = VM_RESULT_SUCCESS;
 
 exit:
-    free(cpuid2);
+    free(cpuid_info);
 
     return result;
 #endif
