@@ -387,8 +387,7 @@ static void vm_debug_cpuid_test(void)
         "pg2=0x0083,512",
         "vcpu_table=0x3000",
         "vcpu_entry=0x0000",
-        "debug_break=1",
-        "data=0,8,0xb8,0x01,0x00,0x00,0x00,0x0f,0xa2,0xf4",
+        "data=0,9,0xb8,0x01,0x00,0x00,0x00,0x0f,0xa2,0xeb,0xfe", /* mov eax,1; cpuid; loop: jmp loop */
         0,
     };
     vm_t *instance;
@@ -396,34 +395,49 @@ static void vm_debug_cpuid_test(void)
     vm_count_t regl;
 
     memset(&config, 0, sizeof config);
-    config.vcpu_count = 1;
+    config.vcpu_count = 2;
 
     result = vm_run(&config, tconfigv, &instance);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_SETBP, 0, 7, 0, 0);
+#if defined(_WIN64)
+    Sleep(300);
+#else
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 300000000;
+    nanosleep(&ts, 0);
+#endif
+
+    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_CONT, 0, 0, 0, 0);
+    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
     ASSERT(vm_result_check(result));
 
-    result = vm_debug(instance, VM_DEBUG_WAIT, 0, 0, 0, 0);
-    ASSERT(vm_result_check(result));
-
-    result = vm_debug(instance, VM_DEBUG_DELBP, 0, 7, 0, 0);
-    ASSERT(vm_result_check(result));
-
+    /* VCPU #0 */
     regl = sizeof regs;
     result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
     ASSERT(vm_result_check(result));
-
     /* assert rip == 7 */
     ASSERT(regs[128] == 7);
-
     /* assert (rcx & 0x80000000); hypervisor present */
     ASSERT(regs[19] & 0x80);
+    /* assert (rbx & 0xff000000); local apic id == 0 */
+    ASSERT(0 == (regs[11] & 0xff));
 
-    result = vm_debug(instance, VM_DEBUG_DETACH, 0, 0, 0, 0);
+    /* VCPU #1 */
+    regl = sizeof regs;
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 1, 0, regs, &regl);
+    ASSERT(vm_result_check(result));
+    /* assert rip == 7 */
+    ASSERT(regs[128] == 7);
+    /* assert (rcx & 0x80000000); hypervisor present */
+    ASSERT(regs[19] & 0x80);
+    /* assert (rbx & 0xff000000); local apic id == 1 */
+    ASSERT(1 == (regs[11] & 0xff));
+
+    result = vm_terminate(instance);
     ASSERT(vm_result_check(result));
 
     result = vm_wait(instance);
