@@ -278,6 +278,78 @@ static void vm_debug_range_test(void)
     ASSERT(vm_result_check(result));
 }
 
+static void vm_debug_cpuid_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    char *tconfigv[] =
+    {
+        "mmap=0,0x10000",
+        "pg0=0x1000",
+        "pg1=0x2003",
+        "pg2=0x0083,512",
+        "vcpu_table=0x3000",
+        "vcpu_entry=0x0000",
+        "data=0,9,0xb8,0x01,0x00,0x00,0x00,0x0f,0xa2,0xeb,0xfe", /* mov eax,1; cpuid; loop: jmp loop */
+        0,
+    };
+    vm_t *instance;
+    char regs[1024];
+    vm_count_t regl;
+
+    memset(&config, 0, sizeof config);
+    config.vcpu_count = 2;
+
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(vm_result_check(result));
+
+#if defined(_WIN64)
+    Sleep(300);
+#else
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 300000000;
+    nanosleep(&ts, 0);
+#endif
+
+    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
+    ASSERT(vm_result_check(result));
+
+    /* VCPU #0 */
+    regl = sizeof regs;
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
+    ASSERT(vm_result_check(result));
+    /* assert rip == 7 */
+    ASSERT(regs[128] == 7);
+    /* assert (rcx & 0x80000000); hypervisor present */
+    ASSERT(regs[19] & 0x80);
+    /* assert (rbx & 0xff000000); local apic id == 0 */
+    ASSERT(0 == (regs[11] & 0xff));
+
+    /* VCPU #1 */
+    regl = sizeof regs;
+    result = vm_debug(instance, VM_DEBUG_GETREGS, 1, 0, regs, &regl);
+    ASSERT(vm_result_check(result));
+    /* assert rip == 7 */
+    ASSERT(regs[128] == 7);
+    /* assert (rcx & 0x80000000); hypervisor present */
+    ASSERT(regs[19] & 0x80);
+    /* assert (rbx & 0xff000000); local apic id == 1 */
+    ASSERT(1 == (regs[11] & 0xff));
+
+    result = vm_terminate(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_wait(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_delete(instance);
+    ASSERT(vm_result_check(result));
+}
+
 static void vm_debug_server_test(void)
 {
     vm_result_t result;
@@ -364,78 +436,6 @@ static void vm_debug_server_test(void)
 
     result = vm_debug_server_stop(instance);
     ASSERT(vm_result_check(result));
-
-    result = vm_terminate(instance);
-    ASSERT(vm_result_check(result));
-
-    result = vm_wait(instance);
-    ASSERT(vm_result_check(result));
-
-    result = vm_delete(instance);
-    ASSERT(vm_result_check(result));
-}
-
-static void vm_debug_cpuid_test(void)
-{
-    vm_result_t result;
-    vm_config_t config;
-    char *tconfigv[] =
-    {
-        "mmap=0,0x10000",
-        "pg0=0x1000",
-        "pg1=0x2003",
-        "pg2=0x0083,512",
-        "vcpu_table=0x3000",
-        "vcpu_entry=0x0000",
-        "data=0,9,0xb8,0x01,0x00,0x00,0x00,0x0f,0xa2,0xeb,0xfe", /* mov eax,1; cpuid; loop: jmp loop */
-        0,
-    };
-    vm_t *instance;
-    char regs[1024];
-    vm_count_t regl;
-
-    memset(&config, 0, sizeof config);
-    config.vcpu_count = 2;
-
-    result = vm_run(&config, tconfigv, &instance);
-    ASSERT(vm_result_check(result));
-
-#if defined(_WIN64)
-    Sleep(300);
-#else
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 300000000;
-    nanosleep(&ts, 0);
-#endif
-
-    result = vm_debug(instance, VM_DEBUG_ATTACH, 0, 0, 0, 0);
-    ASSERT(vm_result_check(result));
-
-    result = vm_debug(instance, VM_DEBUG_BREAK, 0, 0, 0, 0);
-    ASSERT(vm_result_check(result));
-
-    /* VCPU #0 */
-    regl = sizeof regs;
-    result = vm_debug(instance, VM_DEBUG_GETREGS, 0, 0, regs, &regl);
-    ASSERT(vm_result_check(result));
-    /* assert rip == 7 */
-    ASSERT(regs[128] == 7);
-    /* assert (rcx & 0x80000000); hypervisor present */
-    ASSERT(regs[19] & 0x80);
-    /* assert (rbx & 0xff000000); local apic id == 0 */
-    ASSERT(0 == (regs[11] & 0xff));
-
-    /* VCPU #1 */
-    regl = sizeof regs;
-    result = vm_debug(instance, VM_DEBUG_GETREGS, 1, 0, regs, &regl);
-    ASSERT(vm_result_check(result));
-    /* assert rip == 7 */
-    ASSERT(regs[128] == 7);
-    /* assert (rcx & 0x80000000); hypervisor present */
-    ASSERT(regs[19] & 0x80);
-    /* assert (rbx & 0xff000000); local apic id == 1 */
-    ASSERT(1 == (regs[11] & 0xff));
 
     result = vm_terminate(instance);
     ASSERT(vm_result_check(result));
