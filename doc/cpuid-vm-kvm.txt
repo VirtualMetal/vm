@@ -100,6 +100,56 @@
       complex cache indexing             = false
       number of sets (s)                 = 64
       (size synth)                       = 49152 (48 KB)
+      --- cache 1 ---
+      cache type                         = instruction cache (2)
+      cache level                        = 0x1 (1)
+      self-initializing cache level      = true
+      fully associative cache            = false
+      maximum IDs for CPUs sharing cache = 0x1 (1)
+      maximum IDs for cores in pkg       = 0x3 (3)
+      system coherency line size         = 0x40 (64)
+      physical line partitions           = 0x1 (1)
+      ways of associativity              = 0x8 (8)
+      number of sets                     = 0x40 (64)
+      WBINVD/INVD acts on lower caches   = false
+      inclusive to lower caches          = false
+      complex cache indexing             = false
+      number of sets (s)                 = 64
+      (size synth)                       = 32768 (32 KB)
+      --- cache 2 ---
+      cache type                         = unified cache (3)
+      cache level                        = 0x2 (2)
+      self-initializing cache level      = true
+      fully associative cache            = false
+      maximum IDs for CPUs sharing cache = 0x1 (1)
+      maximum IDs for cores in pkg       = 0x3 (3)
+      system coherency line size         = 0x40 (64)
+      physical line partitions           = 0x1 (1)
+      ways of associativity              = 0x8 (8)
+      number of sets                     = 0x400 (1024)
+      WBINVD/INVD acts on lower caches   = false
+      inclusive to lower caches          = false
+      complex cache indexing             = false
+      number of sets (s)                 = 1024
+      (size synth)                       = 524288 (512 KB)
+      --- cache 3 ---
+      cache type                         = unified cache (3)
+      cache level                        = 0x3 (3)
+      self-initializing cache level      = true
+      fully associative cache            = false
+      maximum IDs for CPUs sharing cache = 0x7 (7)
+      maximum IDs for cores in pkg       = 0x3 (3)
+      system coherency line size         = 0x40 (64)
+      physical line partitions           = 0x1 (1)
+      ways of associativity              = 0x10 (16)
+      number of sets                     = 0x2000 (8192)
+      WBINVD/INVD acts on lower caches   = false
+      inclusive to lower caches          = true
+      complex cache indexing             = false
+      number of sets (s)                 = 8192
+      (size synth)                       = 8388608 (8 MB)
+      --- cache 4 ---
+      cache type                         = no more caches (0)
    MONITOR/MWAIT (5):
       smallest monitor-line size (bytes)       = 0x0 (0)
       largest monitor-line size (bytes)        = 0x0 (0)
@@ -278,12 +328,22 @@
       bit width of fixed counters              = 0x30 (48)
       anythread deprecation                    = true
    x2APIC features / processor topology (0xb):
-      extended APIC ID                      = 5
+      extended APIC ID                      = 3
       --- level 0 ---
       level number                          = 0x0 (0)
       level type                            = thread (1)
       bit width of level                    = 0x1 (1)
       number of logical processors at level = 0x2 (2)
+      --- level 1 ---
+      level number                          = 0x1 (1)
+      level type                            = core (2)
+      bit width of level                    = 0x3 (3)
+      number of logical processors at level = 0x8 (8)
+      --- level 2 ---
+      level number                          = 0x2 (2)
+      level type                            = invalid (0)
+      bit width of level                    = 0x0 (0)
+      number of logical processors at level = 0x0 (0)
    XSAVE features (0xd/0):
       XCR0 valid bit field mask               = 0x00000000000000e7
          XCR0 supported: x87 state            = true
@@ -306,6 +366,42 @@
          XTILEDATA supported                  = false
       bytes required by fields in XCR0        = 0x00000240 (576)
       bytes required by XSAVE/XRSTOR area     = 0x00000a80 (2688)
+   XSAVE features (0xd/1):
+      XSAVEOPT instruction                        = true
+      XSAVEC instruction                          = true
+      XGETBV instruction                          = true
+      XSAVES/XRSTORS instructions                 = true
+      XFD: extended feature disable supported     = false
+      SAVE area size in bytes                     = 0x00000240 (576)
+      IA32_XSS lower 32 bits valid bit field mask = 0x00000000
+      IA32_XSS upper 32 bits valid bit field mask = 0x00000000
+   AVX/YMM features (0xd/2):
+      AVX/YMM save state byte size             = 0x00000100 (256)
+      AVX/YMM save state byte offset           = 0x00000240 (576)
+      supported in IA32_XSS or XCR0            = XCR0 (user state)
+      64-byte alignment in compacted XSAVE     = false
+      XFD faulting supported                   = false
+   AVX-512 opmask features (0xd/5):
+      AVX-512 opmask save state byte size      = 0x00000040 (64)
+      AVX-512 opmask save state byte offset    = 0x00000440 (1088)
+      supported in IA32_XSS or XCR0            = XCR0 (user state)
+      64-byte alignment in compacted XSAVE     = false
+      XFD faulting supported                   = false
+   AVX-512 ZMM_Hi256 features (0xd/6):
+      AVX-512 ZMM_Hi256 save state byte size   = 0x00000200 (512)
+      AVX-512 ZMM_Hi256 save state byte offset = 0x00000480 (1152)
+      supported in IA32_XSS or XCR0            = XCR0 (user state)
+      64-byte alignment in compacted XSAVE     = false
+      XFD faulting supported                   = false
+   AVX-512 Hi16_ZMM features (0xd/7):
+      AVX-512 Hi16_ZMM save state byte size    = 0x00000400 (1024)
+      AVX-512 Hi16_ZMM save state byte offset  = 0x00000680 (1664)
+      supported in IA32_XSS or XCR0            = XCR0 (user state)
+      64-byte alignment in compacted XSAVE     = false
+      XFD faulting supported                   = false
+   Quality of Service Monitoring Resource Type (0xf/0):
+      Maximum range of RMID = 0
+      supports L3 cache QoS monitoring = false
    Quality of Service Monitoring Resource Type (0xf/0):
       Maximum range of RMID = 0
       supports L3 cache QoS monitoring = false
