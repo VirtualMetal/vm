@@ -13,7 +13,7 @@ pg0=0
 pg1=0x1003,1
 
 # PDPTE[0..511] identity map the first 512G of RAM.
-# Bits 0x83: Present=1, Read/Write=1. PageSize=1
+# Bits 0x83: Present=1, Read/Write=1, PageSize=1.
 pg2=0x0083,512
 
 # Use a single VCPU.
