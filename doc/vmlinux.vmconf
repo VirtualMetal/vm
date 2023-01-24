@@ -19,6 +19,6 @@ pg2=0x0083,512
 # Use a single VCPU.
 vcpu_count=1
 
-# Map the VCPU data tables (one per VCPU) at guest physical address 0x3000.
+# Map the VCPU data tables (one per VCPU) at guest physical address 0x2000.
 # This contains a minimal GDT and TSS suitable for booting Linux.
-vcpu_table=0x3000
+vcpu_table=0x2000
