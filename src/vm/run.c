@@ -16,8 +16,10 @@
 vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance)
 {
     /* command/command-with-index macros */
-#define CMD(S)  (0 == invariant_strncmp(p, S "=", sizeof S) && \
-    (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p += sizeof S))
+#define CMD(S)\
+    (0 == invariant_strncmp(p, S, sizeof S - 1) && \
+    (('=' == p[sizeof S - 1] && (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p += sizeof S)) || \
+    ('\0' == p[sizeof S - 1] && (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p = "1"))))
 #define CMI(S,L,U)\
     (0 == invariant_strncmp(p, S, sizeof S - 1) && \
     (cmi = (unsigned)strtoullint(p + sizeof S - 1, &cmip, +10), '=' == *cmip) && \

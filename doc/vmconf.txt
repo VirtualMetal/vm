@@ -5,10 +5,14 @@
 # Other white space is significant and is not ignored.
 
 # A line contains either a <name>=<value> pair or
+# the shorthand <name> which stands for the pair <name>=1 or
 # a file path that contains a / (or \ on Windows).
 
 # A <name>=<value> pair is a configuration command with form:
 #<name>=<value>
+
+# A <name> shorthand is a configuration command with form:
+#<name>
 
 # A path is a command to include the file contents with form:
 #/path/to/file
