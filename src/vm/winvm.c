@@ -1885,7 +1885,8 @@ static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
     *pguest_address = 0;
 
     hresult = WHvTranslateGva(instance->partition,
-        (UINT32)vcpu_index, guest_virtual_address, WHvTranslateGvaFlagValidateRead,
+        (UINT32)vcpu_index, guest_virtual_address,
+        WHvTranslateGvaFlagPrivilegeExempt | WHvTranslateGvaFlagValidateRead,
         &translation, &guest_address);
     if (FAILED(hresult))
     {
