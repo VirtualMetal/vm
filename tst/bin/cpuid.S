@@ -2,7 +2,7 @@
 
 /*
  * GDB:
- *     dprintf dp_cpuid,"%08x %02x: eax=%08x ebx=%08x ecx=%08x edx=%08x\n",$esi,$edi,$eax,$ebx,$ecx,$edx
+ *     dprintf dp_cpuid,"0x%08x 0x%02x: eax=0x%08x ebx=0x%08x ecx=0x%08x edx=0x%08x\n",$esi,$edi,$eax,$ebx,$ecx,$edx
  */
 
 .global _start
