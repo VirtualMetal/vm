@@ -117,10 +117,34 @@ static DWORD WINAPI vm_debug_server_thread(PVOID instance0);
 static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm_count_t *plength);
 
 #if defined(_M_X64)
+#define SIG_TO_REG(c0,c1,c2,c3)         ((c0) | ((c1) << 8) | ((c2) << 16) | ((c3) << 24))
 static WHV_X64_CPUID_RESULT2 vm_vcpu_cpuid_results[] =
 {
     { .Function = 1, .Output.Ecx = 0x80000000, .Mask.Ecx = 0x80000000 /* hypervisor present */},
+    {
+        .Function = 0x40000000,
+        .Output.Eax = 0x40000001,
+        .Output.Ebx = SIG_TO_REG('V','i','r','t'),
+        .Output.Ecx = SIG_TO_REG('u','a','l','M'),
+        .Output.Edx = SIG_TO_REG('e','t','a','l'),
+        .Mask.Eax = 0xffffffff,
+        .Mask.Ebx = 0xffffffff,
+        .Mask.Ecx = 0xffffffff,
+        .Mask.Edx = 0xffffffff,
+    },
+    {
+        .Function = 0x40000001,
+        .Output.Eax = 0,
+        .Output.Ebx = 0,
+        .Output.Ecx = 0,
+        .Output.Edx = 0,
+        .Mask.Eax = 0xffffffff,
+        .Mask.Ebx = 0xffffffff,
+        .Mask.Ecx = 0xffffffff,
+        .Mask.Edx = 0xffffffff,
+    }
 };
+#undef SIG_TO_REG
 #endif
 
 #if defined(_M_X64)
@@ -147,10 +171,13 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     vm_t *instance = 0;
     vm_count_t vcpu_count;
     BOOL hypervisor_present;
+    WHV_CAPABILITY_FEATURES features;
     WHV_EXTENDED_VM_EXITS extended_vm_exits;
+    WHV_SYNTHETIC_PROCESSOR_FEATURES_BANKS synthetic_processor_features;
     UINT32 processor_count;
     UINT32 cpuid_exits[sizeof vm_vcpu_cpuid_results / sizeof vm_vcpu_cpuid_results[0]];
     UINT64 exception_exit_bitmap;
+    WHV_X64_LOCAL_APIC_EMULATION_MODE lapic_mode;
     HRESULT hresult;
 
     *pinstance = 0;
@@ -179,11 +206,36 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
 
     hresult = WHvGetCapability(
+        WHvCapabilityCodeFeatures, &features, sizeof features, 0);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+        goto exit;
+    }
+    if ((config->passthrough || config->vpic) && !features.LocalApicEmulation)
+    {
+        result = vm_result(VM_ERROR_HYPERVISOR, 0);
+        goto exit;
+    }
+
+    hresult = WHvGetCapability(
         WHvCapabilityCodeExtendedVmExits, &extended_vm_exits, sizeof extended_vm_exits, 0);
     if (FAILED(hresult))
     {
         result = vm_result(VM_ERROR_HYPERVISOR, hresult);
         goto exit;
+    }
+
+    if (config->passthrough)
+    {
+        hresult = WHvGetCapability(
+            WHvCapabilityCodeSyntheticProcessorFeaturesBanks,
+            &synthetic_processor_features, sizeof synthetic_processor_features, 0);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
     }
 
     instance = malloc(sizeof *instance);
@@ -234,38 +286,65 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
-#if defined(_M_X64)
-    hresult = WHvSetPartitionProperty(instance->partition,
-        WHvPartitionPropertyCodeCpuidResultList2, &vm_vcpu_cpuid_results, sizeof vm_vcpu_cpuid_results);
-    if (FAILED(hresult))
+    if (instance->config.passthrough || instance->config.vpic)
     {
-        if (WHV_E_UNKNOWN_PROPERTY != hresult)
-        {
-            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
-            goto exit;
-        }
-
-        /* CpuidResultList2 not supported: fall back to CpuidExit method */
-        if (!extended_vm_exits.X64CpuidExit)
-        {
-            result = vm_result(VM_ERROR_HYPERVISOR, 0);
-            goto exit;
-        }
-
-        for (vm_count_t i = 0; sizeof vm_vcpu_cpuid_results / sizeof vm_vcpu_cpuid_results[0] > i; i++)
-            cpuid_exits[i] = vm_vcpu_cpuid_results[i].Function;
-
+        lapic_mode = WHvX64LocalApicEmulationModeXApic;
         hresult = WHvSetPartitionProperty(instance->partition,
-            WHvPartitionPropertyCodeCpuidExitList, cpuid_exits, sizeof cpuid_exits);
+            WHvPartitionPropertyCodeLocalApicEmulationMode,
+            &lapic_mode, sizeof lapic_mode);
         if (FAILED(hresult))
         {
             result = vm_result(VM_ERROR_HYPERVISOR, hresult);
             goto exit;
         }
-
-        instance->extended_vm_exits.X64CpuidExit = 1;
     }
+
+    if (instance->config.passthrough)
+    {
+        hresult = WHvSetPartitionProperty(instance->partition,
+            WHvPartitionPropertyCodeSyntheticProcessorFeaturesBanks,
+            &synthetic_processor_features, sizeof synthetic_processor_features);
+        if (FAILED(hresult))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+            goto exit;
+        }
+    }
+    else
+    {
+#if defined(_M_X64)
+        hresult = WHvSetPartitionProperty(instance->partition,
+            WHvPartitionPropertyCodeCpuidResultList2, &vm_vcpu_cpuid_results, sizeof vm_vcpu_cpuid_results);
+        if (FAILED(hresult))
+        {
+            if (WHV_E_UNKNOWN_PROPERTY != hresult)
+            {
+                result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+                goto exit;
+            }
+
+            /* CpuidResultList2 not supported: fall back to CpuidExit method */
+            if (!extended_vm_exits.X64CpuidExit)
+            {
+                result = vm_result(VM_ERROR_HYPERVISOR, 0);
+                goto exit;
+            }
+
+            for (vm_count_t i = 0; sizeof vm_vcpu_cpuid_results / sizeof vm_vcpu_cpuid_results[0] > i; i++)
+                cpuid_exits[i] = vm_vcpu_cpuid_results[i].Function;
+
+            hresult = WHvSetPartitionProperty(instance->partition,
+                WHvPartitionPropertyCodeCpuidExitList, cpuid_exits, sizeof cpuid_exits);
+            if (FAILED(hresult))
+            {
+                result = vm_result(VM_ERROR_HYPERVISOR, hresult);
+                goto exit;
+            }
+
+            instance->extended_vm_exits.X64CpuidExit = 1;
+        }
 #endif
+    }
 
     if (!instance->has_settable_whv_properties &&
         instance->is_debuggable &&

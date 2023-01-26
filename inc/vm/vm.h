@@ -55,7 +55,9 @@ struct vm_config
     vm_count_t log_flags;
     vm_count_t compat_flags;
     vm_count_t vcpu_count;              /* number of virtual cpu's */
-    vm_count_t reserved0[4];
+    vm_count_t passthrough:1;           /* pass through native hypervisor features */
+    vm_count_t vpic:1;                  /* virtual PIC support */
+    vm_count_t reserved0[3];
 
     /* reconfigurable */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */

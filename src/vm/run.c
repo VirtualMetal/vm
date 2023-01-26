@@ -91,6 +91,18 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             config.vcpu_count = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
+        else
+        if (CMD("passthrough"))
+        {
+            config.passthrough = !!strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
+        else
+        if (CMD("vpic"))
+        {
+            config.vpic = !!strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+        }
     }
 
     result = vm_create(&config, &instance);

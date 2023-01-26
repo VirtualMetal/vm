@@ -289,6 +289,22 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
         goto exit;
     }
 
+    if (instance->config.passthrough || instance->config.vpic)
+    {
+        if (-1 == ioctl(instance->vm_fd, KVM_CREATE_IRQCHIP, NULL))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, errno);
+            goto exit;
+        }
+
+        struct kvm_pit_config pit_config = { 0 };
+        if (-1 == ioctl(instance->vm_fd, KVM_CREATE_PIT2, &pit_config))
+        {
+            result = vm_result(VM_ERROR_HYPERVISOR, errno);
+            goto exit;
+        }
+    }
+
     *pinstance = instance;
     result = VM_RESULT_SUCCESS;
 
@@ -1670,6 +1686,26 @@ static vm_result_t vm_vcpu_init_cpuid(vm_t *instance, unsigned vcpu_index, int v
             cpuid_info->entries[i].ebx = (vcpu_index << 24) |
                 (cpuid_info->entries[i].ebx & 0x00ffffff);  /* fix LAPIC ID */
             cpuid_info->entries[i].ecx |= 0x80000000;       /* hypervisor present */
+            break;
+        case 0x40000000:
+            if (!instance->config.passthrough)
+            {
+#define SIG_TO_REG(c0,c1,c2,c3)         ((c0) | ((c1) << 8) | ((c2) << 16) | ((c3) << 24))
+                cpuid_info->entries[i].eax = 0x40000001;
+                cpuid_info->entries[i].ebx = SIG_TO_REG('V','i','r','t');
+                cpuid_info->entries[i].ecx = SIG_TO_REG('u','a','l','M');
+                cpuid_info->entries[i].edx = SIG_TO_REG('e','t','a','l');
+#undef SIG_TO_REG
+            }
+            break;
+        case 0x40000001:
+            if (!instance->config.passthrough)
+            {
+                cpuid_info->entries[i].eax = 0;
+                cpuid_info->entries[i].ebx = 0;
+                cpuid_info->entries[i].ecx = 0;
+                cpuid_info->entries[i].edx = 0;
+            }
             break;
         }
 

@@ -328,7 +328,7 @@
       bit width of fixed counters              = 0x30 (48)
       anythread deprecation                    = true
    x2APIC features / processor topology (0xb):
-      extended APIC ID                      = 3
+      extended APIC ID                      = 2
       --- level 0 ---
       level number                          = 0x0 (0)
       level type                            = thread (1)
@@ -475,28 +475,8 @@
       core type               = 0x0 (0)
    PCONFIG information (0x1b/0x0):
       sub-leaf type = invalid (0)
-   hypervisor_id (0x40000000) = "KVMKVMKVM\0\0\0"
-   hypervisor features (0x40000001/eax):
-      kvmclock available at MSR 0x11           = true
-      delays unnecessary for PIO ops           = true
-      mmu_op                                   = false
-      kvmclock available at MSR 0x4b564d00     = true
-      async pf enable available by MSR         = true
-      steal clock supported                    = true
-      guest EOI optimization enabled           = true
-      guest spinlock optimization enabled      = true
-      guest TLB flush optimization enabled     = true
-      async PF VM exit enable available by MSR = true
-      guest send IPI optimization enabled      = true
-      host HLT poll disable at MSR 0x4b564d05  = true
-      guest sched yield optimization enabled   = true
-      guest uses intrs for page ready APF evs  = true
-      extended destination ID                  = false
-      map gpa range hypercall supported        = false
-      MSR_KVM_MIGRATION_CONTROL supported      = false
-      stable: no guest per-cpu warps expected  = true
-   hypervisor features (0x40000001/edx):
-      realtime hint: no unbound preemption = false
+   hypervisor_id (0x40000000) = "VirtualMetal"
+   0x40000001 0x00: eax=0x00000000 ebx=0x00000000 ecx=0x00000000 edx=0x00000000
    extended feature flags (0x80000001/edx):
       SYSCALL and SYSRET instructions        = true
       execution disable                      = true
