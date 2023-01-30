@@ -1,0 +1,57 @@
+<Project>
+
+  <!-- item definitions (target os | configuration) -->
+  <ItemDefinitionGroup Condition="'$(ApplicationType)|$(Configuration)'=='|Debug'">
+    <ClCompile>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level3</WarningLevel>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(ApplicationType)|$(Configuration)'=='|Release'">
+    <ClCompile>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level3</WarningLevel>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(ApplicationType)|$(Configuration)'=='Linux|Debug'">
+    <ClCompile>
+      <CLanguageStandard>c11</CLanguageStandard>
+      <StrictAliasing>false</StrictAliasing>
+      <ExceptionHandling>Disabled</ExceptionHandling>
+      <WarningLevel>EnableAllWarnings</WarningLevel>
+      <CAdditionalWarning>conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
+      <DebugInformationFormat>FullDebug</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <DebuggerSymbolInformation>true</DebuggerSymbolInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(ApplicationType)|$(Configuration)'=='Linux|Release'">
+    <ClCompile>
+      <CLanguageStandard>c11</CLanguageStandard>
+      <StrictAliasing>false</StrictAliasing>
+      <ExceptionHandling>Disabled</ExceptionHandling>
+      <WarningLevel>EnableAllWarnings</WarningLevel>
+      <CAdditionalWarning>conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
+      <DebugInformationFormat>None</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <DebuggerSymbolInformation>OmitAllSymbolInformation</DebuggerSymbolInformation>
+    </Link>
+  </ItemDefinitionGroup>
+
+</Project>

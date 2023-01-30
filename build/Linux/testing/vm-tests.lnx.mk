@@ -19,4 +19,4 @@ Compile = \
 	../../../tst/vm-tests/vm-tests.c
 
 CPPFLAGS=-I../../../tst -I../../../src -I../../../inc
-include ../common.mk
+include ../common.inc

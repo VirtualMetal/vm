@@ -49,7 +49,6 @@
     </ClCompile>
     <Link>
       <LibraryDependencies>pthread</LibraryDependencies>
-      <DebuggerSymbolInformation>OmitAllSymbolInformation</DebuggerSymbolInformation>
       <AdditionalOptions>-static %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>

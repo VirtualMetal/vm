@@ -50,7 +50,6 @@
     <Link>
       <LibraryDependencies>pthread</LibraryDependencies>
       <AdditionalOptions>-static %(AdditionalOptions)</AdditionalOptions>
-      <DebuggerSymbolInformation>OmitAllSymbolInformation</DebuggerSymbolInformation>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

@@ -12,4 +12,4 @@ Compile = \
 	../../src/vm/run.c \
 	../../src/vm/textconf.c
 
-include common.mk
+include common.inc

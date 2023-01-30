@@ -11,10 +11,14 @@ IntDir ?= $(commondir)build/$(ProjectName).build/$(Configuration)/$(PlatformTarg
 CC := /opt/x86_64-linux-musl-native/bin/g++
 CC := $(if $(wildcard $(CC)),$(CC),g++)
 CPPFLAGS ?= -I$(commondir)../../src -I$(commondir)../../inc
-CFLAGS ?= -xc -std=c11 -Wall
-CFLAGS += $(if $(findstring Debug,$(Configuration)),-g,)
-CFLAGS += $(if $(findstring Release,$(Configuration)),-O3,)
+CPPFLAGS += $(if $(findstring Debug,$(Configuration)),,)
+CPPFLAGS += $(if $(findstring Release,$(Configuration)),-DNDEBUG,)
+CFLAGS ?=
+CFLAGS += -xc -std=c11 -fno-strict-aliasing -fno-exceptions -Wall -Wconversion -Wno-sign-conversion -Wno-pointer-sign
+CFLAGS += $(if $(findstring Debug,$(Configuration)),-O0 -fno-omit-frame-pointer -g2 -gdwarf-2,)
+CFLAGS += $(if $(findstring Release,$(Configuration)),-O3 -fomit-frame-pointer -g0,)
 LDFLAGS ?= -static
+LDFLAGS += -Wl,--no-undefined -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack
 LDFLAGS += $(if $(findstring Release,$(Configuration)),-Wl$(comma)--strip-all,)
 LDLIBS ?= -lpthread
 

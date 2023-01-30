@@ -1,5 +1,6 @@
 <Project>
   <PropertyGroup>
     <ForceImportAfterCppDefaultProps>$(MsbuildThisFileDirectory)\build.common.props</ForceImportAfterCppDefaultProps>
+    <ForceImportAfterCppProps>$(MsbuildThisFileDirectory)\build.extra.props</ForceImportAfterCppProps>
   </PropertyGroup>
 </Project>
