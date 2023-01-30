@@ -11,5 +11,6 @@ Compile = \
 	../../src/vm/result.c \
 	../../src/vm/run.c \
 	../../src/vm/textconf.c
+Incdirs = ../../src ../../inc
 
 include common.inc

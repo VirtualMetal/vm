@@ -5,6 +5,7 @@
     <TargetName>$([System.IO.Path]::GetFileNameWithoutExtension($(ProjectName)))</TargetName>
     <OutDir>$(SolutionDir)build\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)build\$(ProjectName).build\$(Configuration)\$(PlatformTarget)\</IntDir>
+    <MyTopDir>$([MSBuild]::EnsureTrailingSlash($([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), .git/HEAD))))</MyTopDir>
   </PropertyGroup>
 
   <!-- properties (target OS | configuration) -->

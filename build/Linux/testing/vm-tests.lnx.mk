@@ -17,6 +17,6 @@ Compile = \
 	../../../tst/vm-tests/run-test.c \
 	../../../tst/vm-tests/textconf-test.c \
 	../../../tst/vm-tests/vm-tests.c
+Incdirs = ../../../tst ../../../src ../../../inc
 
-CPPFLAGS=-I../../../tst -I../../../src -I../../../inc
 include ../common.inc
