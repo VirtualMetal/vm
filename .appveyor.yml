@@ -1,6 +1,8 @@
 version: '{build}'
 
-image: Visual Studio 2022
+image:
+- Visual Studio 2022
+- Ubuntu2004
 
 environment:
   # vm-tests compatibility flags: VM_CONFIG_COMPAT_WHV_DEBUG
@@ -11,12 +13,27 @@ environment:
   - Configuration: Release
 
 install:
-- ps: Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All
-- wsl sudo apt-get -qy update
-- wsl sudo apt-get -qy install g++ gdb make ninja-build rsync zip
+- ps: |
+    if ($isWindows) {
+        Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All
+        wsl sudo apt-get -qy update
+        wsl sudo apt-get -qy install g++ gdb make ninja-build rsync zip
+    } elseif ($isLinux) {
+        sudo chmod o+rw /dev/kvm
+    }
 
 build_script:
-- python tools\build.py %Configuration%
+- ps: |
+    if ($isWindows) {
+        python tools/build.py $env:Configuration
+    } elseif ($isLinux) {
+        python3 tools/build.py $env:Configuration
+    }
 
 test_script:
-- build\VStudio\build\%Configuration%\vm-tests.exe
+- ps: |
+    if ($isWindows) {
+        & build/VStudio/build/$env:Configuration/vm-tests
+    } elseif ($isLinux) {
+        & build/Linux/build/$env:Configuration/vm-tests
+    }
