@@ -130,12 +130,21 @@ def generate(bluedir, projdir):
             info("%s -> %s" % (bluefile, projfile))
             _genmap[os.path.splitext(projfile)[1]](m.__dict__, projfile)
 
+def guess(projdir):
+    if projdir:
+        return projdir
+    if sys.platform.startswith("win32"):
+        projdir = "VStudio"
+    elif sys.platform.startswith("linux"):
+        projdir = "Linux"
+    return os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), "..", "build", projdir))
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("bluedir", help="blueprint directory")
-    p.add_argument("projdir", help="project directory")
+    p.add_argument("projdir", nargs="?", help="project directory")
     args = p.parse_args(sys.argv[1:])
-    generate(args.bluedir, args.projdir)
+    generate(args.bluedir, guess(args.projdir))
 
 def info(s):
     print("%s: %s" % (os.path.basename(sys.argv[0]), s))

@@ -31,10 +31,10 @@ LDFLAGS += $(if $(findstring Release,$(Configuration)),-Wl$(comma)--strip-all,)
 LDLIBS ?= -lpthread
 
 objmap = $(addprefix $(IntDir)/,$(notdir $(1:.c=.o)))
-ccrule = $(call objmap,$(1)): $(1) $(Include) | $(IntDir); $(CC) $(CPPFLAGS) $(CFLAGS) -c -o $$@ $$<
+ccrule = $(call objmap,$(1)): $(1) $(Include) | $(IntDir); $(call MakeQuiet,compile $$(<F))$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $$@ $$<
 Objects = $(call objmap,$(Compile))
 
 $(ProjectName): $(OutDir)/$(TargetName)
-$(OutDir)/$(TargetName): $(Objects) | $(OutDir); $(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+$(OutDir)/$(TargetName): $(Objects) | $(OutDir); $(call MakeQuiet,link $(@F))$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 $(foreach _,$(Compile),$(eval $(call ccrule,$(_))))
-$(OutDir) $(IntDir):; mkdir -p $@
+$(OutDir) $(IntDir):; $(call MakeQuiet,)mkdir -p $@
