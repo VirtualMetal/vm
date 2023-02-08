@@ -11,7 +11,7 @@ Compile = [
     "../../src/vm/result.c",
     "../../src/vm/run.c",
     "../../src/vm/textconf.c",
-    "../../src/vm/winvm.c",
+    "../../src/vm/vm_windows.c",
 ]
 Refer = [
     "../../src/vm/library.def"

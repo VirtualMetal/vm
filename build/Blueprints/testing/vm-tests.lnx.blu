@@ -9,11 +9,11 @@ Include = [
 Compile = [
     "../../../src/tlib/testsuite.c",
     "../../../src/vm/gdb.c",
-    "../../../src/vm/lnxvm.c",
     "../../../src/vm/load.c",
     "../../../src/vm/result.c",
     "../../../src/vm/run.c",
     "../../../src/vm/textconf.c",
+    "../../../src/vm/vm_linux.c",
     "../../../tst/vm-tests/debug-test.c",
     "../../../tst/vm-tests/run-test.c",
     "../../../tst/vm-tests/textconf-test.c",

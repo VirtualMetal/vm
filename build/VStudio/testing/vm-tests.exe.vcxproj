@@ -73,7 +73,7 @@
     <ClCompile Include="..\..\..\src\vm\result.c" />
     <ClCompile Include="..\..\..\src\vm\run.c" />
     <ClCompile Include="..\..\..\src\vm\textconf.c" />
-    <ClCompile Include="..\..\..\src\vm\winvm.c" />
+    <ClCompile Include="..\..\..\src\vm\vm_windows.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\debug-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\run-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\textconf-test.c" />

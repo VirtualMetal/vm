@@ -5,12 +5,12 @@ Include = \
 	../../src/vm/internal.h
 Compile = \
 	../../src/vm/gdb.c \
-	../../src/vm/lnxvm.c \
 	../../src/vm/load.c \
 	../../src/vm/program.c \
 	../../src/vm/result.c \
 	../../src/vm/run.c \
-	../../src/vm/textconf.c
+	../../src/vm/textconf.c \
+	../../src/vm/vm_linux.c
 Incdirs = ../../src ../../inc
 
 include common.inc
