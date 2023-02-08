@@ -1560,6 +1560,12 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
     }
 
     memset(&regs, 0, sizeof regs);
+    regs.rdi = instance->config.vcpu_args[0];
+    regs.rsi = instance->config.vcpu_args[1];
+    regs.rdx = instance->config.vcpu_args[2];
+    regs.rcx = instance->config.vcpu_args[3];
+    regs.r8 = instance->config.vcpu_args[4];
+    regs.r9 = instance->config.vcpu_args[5];
     regs.rip = instance->config.vcpu_entry;
     regs.rflags = 2;
 

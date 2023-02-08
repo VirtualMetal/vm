@@ -61,11 +61,12 @@ struct vm_config
 
     /* reconfigurable */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
+    vm_count_t vcpu_args[6];            /* virtual cpu entry args */
     vm_count_t vcpu_table;              /* virtual cpu data table address */
     vm_count_t page_table;              /* page table address */
     vm_count_t exec_textseg;            /* executable file text segment address */
     vm_count_t exec_dataseg;            /* executable file data segment address */
-    vm_count_t reserved1[19];
+    vm_count_t reserved1[13];
 };
 
 #define VM_CONFIG_INDEX(F)              ((vm_count_t)&((vm_config_t *)0)->F / sizeof(vm_count_t))

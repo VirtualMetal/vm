@@ -1545,15 +1545,15 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
 
     regc = 0;
     REGSET(Rax) = REGVAL(0);
-    REGSET(Rcx) = REGVAL(0);
-    REGSET(Rdx) = REGVAL(0);
+    REGSET(Rcx) = REGVAL(instance->config.vcpu_args[3]);
+    REGSET(Rdx) = REGVAL(instance->config.vcpu_args[2]);
     REGSET(Rbx) = REGVAL(0);
     REGSET(Rsp) = REGVAL(0);
     REGSET(Rbp) = REGVAL(0);
-    REGSET(Rsi) = REGVAL(0);
-    REGSET(Rdi) = REGVAL(0);
-    REGSET(R8) = REGVAL(0);
-    REGSET(R9) = REGVAL(0);
+    REGSET(Rsi) = REGVAL(instance->config.vcpu_args[1]);
+    REGSET(Rdi) = REGVAL(instance->config.vcpu_args[0]);
+    REGSET(R8) = REGVAL(instance->config.vcpu_args[4]);
+    REGSET(R9) = REGVAL(instance->config.vcpu_args[5]);
     REGSET(R10) = REGVAL(0);
     REGSET(R11) = REGVAL(0);
     REGSET(R12) = REGVAL(0);

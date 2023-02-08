@@ -5,7 +5,7 @@
 # Other white space is significant and is not ignored.
 
 # A line contains either a <name>=<value> pair or
-# the shorthand <name> which stands for the pair <name>=1 or
+# the shorthand <name> which stands for the pair <name> = 1 or
 # a file path that contains a / (or \ on Windows).
 
 # A <name>=<value> pair is a configuration command with form:
@@ -64,6 +64,9 @@
 
 # Virtual CPU entry point.
 #vcpu_entry=<address>
+
+# Virtual CPU entry arguments (up to 6 total).
+#vcpu_args=<arg>[,<arg>...]
 
 # Virtual CPU table.
 #vcpu_table=<address>

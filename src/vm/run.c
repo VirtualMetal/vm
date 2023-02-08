@@ -172,6 +172,20 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_entry));
         }
         else
+        if (CMD("vcpu_args"))
+        {
+            for (unsigned i = 0; sizeof config.vcpu_args / sizeof config.vcpu_args[0] > i; i++)
+            {
+                config.vcpu_args[i] = strtoullint(p, &p, +1);
+                CHK(',' == *p || '\0' == *p);
+                vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_args[i]));
+                if ('\0' == *p)
+                    break;
+                p++;
+            }
+            CHK('\0' == *p);
+        }
+        else
         if (CMD("vcpu_table"))
         {
             config.vcpu_table = strtoullint(p, &p, +1);
