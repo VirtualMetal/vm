@@ -3,6 +3,8 @@
 import argparse, glob, os, sys, types
 import xml.etree.ElementTree as ET
 
+well_known_tags = { "darwin", "linux", "windows" }
+
 def rglob(rootdir, pattern):
     return glob.iglob(os.path.join(rootdir, pattern), recursive=True)
 
@@ -16,7 +18,12 @@ def execfile(path):
         exec(compile(source.read(), path, "exec"), m.__dict__)
     return m
 
-def getfiles(filespec, projdir, pathsep):
+def matchtag(tags, path):
+    b = os.path.splitext(os.path.basename(path))[0]
+    i = b.rfind("_")
+    return 0 > i or b[i + 1:] not in well_known_tags or b[i + 1:] in tags
+
+def getfiles(tags, filespec, projdir, pathsep):
     fileset = set()
     if filespec:
         altpathsep = "\\" if pathsep == "/" else "/"
@@ -26,8 +33,15 @@ def getfiles(filespec, projdir, pathsep):
             else:
                 op = fileset.remove
                 pattern = pattern[1:]
-            for f in rglob(projdir, pattern):
-                op(os.path.normpath(os.path.relpath(f, projdir)).replace(altpathsep, pathsep))
+            if pattern == glob.escape(pattern):
+                # if the pattern does not contain special characters, do not glob or match tags
+                op(os.path.normpath(pattern).replace(altpathsep, pathsep))
+            else:
+                # if the pattern contains special characters, glob and match tags
+                for f in rglob(projdir, pattern):
+                    if not matchtag(tags, f):
+                        continue
+                    op(os.path.normpath(os.path.relpath(f, projdir)).replace(altpathsep, pathsep))
     return fileset
 
 def xmlprettify(elem, indent="  ", level=0):
@@ -51,12 +65,16 @@ def setelements(root, tag, files):
             j.set("Include", f)
 
 def generate_vcxproj(bluedict, projfile):
-    srcfiles = getfiles(bluedict.get("Compile"), os.path.dirname(projfile), "\\")
-    incfiles = getfiles(bluedict.get("Include"), os.path.dirname(projfile), "\\")
-    reffiles = getfiles(bluedict.get("Refer"), os.path.dirname(projfile), "\\")
     ET.register_namespace("", "http://schemas.microsoft.com/developer/msbuild/2003")
     tree = ET.parse(projfile)
     root = tree.getroot()
+    tags = { "windows" }
+    for i in root.findall("{*}PropertyGroup/{*}ApplicationType"):
+        if "Linux" == i.text:
+            tags = { "linux" }
+    srcfiles = getfiles(tags, bluedict.get("Compile"), os.path.dirname(projfile), "\\")
+    incfiles = getfiles(tags, bluedict.get("Include"), os.path.dirname(projfile), "\\")
+    reffiles = getfiles(tags, bluedict.get("Refer"), os.path.dirname(projfile), "\\")
     setelements(root, "ClInclude", incfiles)
     setelements(root, "ClCompile", srcfiles)
     setelements(root, "None", reffiles)
@@ -82,8 +100,9 @@ def iterate_lines_with_continuation(iter):
         yield " ".join(accum)
 
 def generate_mk(bluedict, projfile):
-    srcfiles = getfiles(bluedict.get("Compile"), os.path.dirname(projfile), "/")
-    incfiles = getfiles(bluedict.get("Include"), os.path.dirname(projfile), "/")
+    tags = { "linux" }
+    srcfiles = getfiles(tags, bluedict.get("Compile"), os.path.dirname(projfile), "/")
+    incfiles = getfiles(tags, bluedict.get("Include"), os.path.dirname(projfile), "/")
     text = []
     with open(projfile, "rt", encoding="utf-8") as file:
         for line in iterate_lines_with_continuation(file):
