@@ -137,14 +137,15 @@ def guess(projdir):
         projdir = "VStudio"
     elif sys.platform.startswith("linux"):
         projdir = "Linux"
-    return os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), "..", "build", projdir))
+    return [os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), "..", "build", projdir))]
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("bluedir", help="blueprint directory")
-    p.add_argument("projdir", nargs="?", help="project directory")
+    p.add_argument("projdirs", metavar="projdir", nargs="*", help="project directory")
     args = p.parse_args(sys.argv[1:])
-    generate(args.bluedir, guess(args.projdir))
+    for projdir in guess(args.projdirs):
+        generate(args.bluedir, projdir)
 
 def info(s):
     print("%s: %s" % (os.path.basename(sys.argv[0]), s))
