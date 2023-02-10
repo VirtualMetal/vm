@@ -17,9 +17,9 @@
 /*
  * See:
  *
- * - [INT] Intel 64 and IA-32 Architectures Software Developer’s Manual Volume 3:
+ * - [INT] Intel 64 and IA-32 Architectures Software Developers Manual Volume 3:
  * System Programming Guide
- * - [AMD] AMD64 Architecture Programmer’s Manual Volume 2: System Programming
+ * - [AMD] AMD64 Architecture Programmers Manual Volume 2: System Programming
  */
 
 /* segment descriptor - [INT 3.4.5], [AMD 4.8.1,4.8.2] */

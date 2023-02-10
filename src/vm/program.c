@@ -1,3 +1,4 @@
+//:build program
 /**
  * @file vm/program.c
  *

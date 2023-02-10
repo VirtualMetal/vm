@@ -1,3 +1,4 @@
+//:build test
 /**
  * @file tlib/testsuite.c
  *

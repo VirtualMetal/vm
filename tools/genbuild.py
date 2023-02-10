@@ -18,10 +18,64 @@ def execfile(path):
         exec(compile(source.read(), path, "exec"), m.__dict__)
     return m
 
-def matchtag(tags, path):
-    b = os.path.splitext(os.path.basename(path))[0]
-    i = b.rfind("_")
-    return 0 > i or b[i + 1:] not in well_known_tags or b[i + 1:] in tags
+def tagparse_c(path):
+    with open(path, "rt", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if line.startswith("//:build "):
+                yield line.split()[1:]
+            elif line and not line.startswith("//"):
+                break
+
+def tagparse_unknown(path):
+    return []
+
+_tagparsemap = {
+    ".h": tagparse_c,
+    ".hpp": tagparse_c,
+    ".hxx": tagparse_c,
+    ".c": tagparse_c,
+    ".cpp": tagparse_c,
+    ".cxx": tagparse_c,
+}
+
+def matchtag(requested_tags, is_wildcard, path):
+    #
+    # Consider :build lines as follows:
+    #
+    #     //:build TAG_1_1 TAG_1_2 ...
+    #     //:build TAG_2_1 TAG_2_2 ...
+    #     ...
+    #     //:build TAG_n_1 TAG_n_2 ...
+    #
+    # A :build line is considered "satisfied" (TRUE) if the set of its tags is a subset
+    # of the requested tags (i.e. all of its tags are satisfied).
+    #
+    #    { TAG_i_1, TAG_i_2, ... } ⊆ requested_tags
+    #
+    # If any :build line is satisfied then the file is included in the build. The absense
+    # of :build lines also means that the file is included in the build.
+    #
+    # The above :build lines are equivalent to the following boolean expression:
+    #
+    #     (TAG_1_1 && TAG_1_2 && ...) ||
+    #     (TAG_2_1 && TAG_2_2 && ...) ||
+    #     ...
+    #     (TAG_n_1 && TAG_n_2 && ...)
+    #
+    # This is inspired but different from Golang's +build constraints.
+    #
+    b, ext = os.path.splitext(os.path.basename(path))
+    if is_wildcard:
+        i = b.rfind("_")
+        if 0 <= i and b[i + 1:] in well_known_tags and not b[i + 1:] in requested_tags:
+            return False
+    has_build_line = False
+    for build_line in _tagparsemap.get(ext, tagparse_unknown)(path):
+        has_build_line = True
+        if set(build_line) <= requested_tags:
+            return True
+    return not has_build_line
 
 def getfiles(tags, filespec, projdir, pathsep):
     fileset = set()
@@ -33,15 +87,12 @@ def getfiles(tags, filespec, projdir, pathsep):
             else:
                 op = fileset.remove
                 pattern = pattern[1:]
-            if pattern == glob.escape(pattern):
-                # if the pattern does not contain special characters, do not glob or match tags
-                op(os.path.normpath(pattern).replace(altpathsep, pathsep))
-            else:
-                # if the pattern contains special characters, glob and match tags
-                for f in rglob(projdir, pattern):
-                    if not matchtag(tags, f):
-                        continue
-                    op(os.path.normpath(os.path.relpath(f, projdir)).replace(altpathsep, pathsep))
+            # only consider well known suffixes as tags when pattern is wildcard
+            is_wildcard = pattern != glob.escape(pattern)
+            for path in rglob(projdir, pattern):
+                if not matchtag(tags, is_wildcard, path):
+                    continue
+                op(os.path.normpath(os.path.relpath(path, projdir)).replace(altpathsep, pathsep))
     return fileset
 
 def xmlprettify(elem, indent="  ", level=0):
@@ -65,13 +116,15 @@ def setelements(root, tag, files):
             j.set("Include", f)
 
 def generate_vcxproj(bluedict, projfile):
+    tags = { "windows" }
+    tags.update(bluedict.get("Tags", []))
     ET.register_namespace("", "http://schemas.microsoft.com/developer/msbuild/2003")
     tree = ET.parse(projfile)
     root = tree.getroot()
-    tags = { "windows" }
     for i in root.findall("{*}PropertyGroup/{*}ApplicationType"):
         if "Linux" == i.text:
-            tags = { "linux" }
+            tags.remove("windows")
+            tags.add("linux")
     srcfiles = getfiles(tags, bluedict.get("Compile"), os.path.dirname(projfile), "\\")
     incfiles = getfiles(tags, bluedict.get("Include"), os.path.dirname(projfile), "\\")
     reffiles = getfiles(tags, bluedict.get("Refer"), os.path.dirname(projfile), "\\")
@@ -101,6 +154,7 @@ def iterate_lines_with_continuation(iter):
 
 def generate_mk(bluedict, projfile):
     tags = { "linux" }
+    tags.update(bluedict.get("Tags", []))
     srcfiles = getfiles(tags, bluedict.get("Compile"), os.path.dirname(projfile), "/")
     incfiles = getfiles(tags, bluedict.get("Include"), os.path.dirname(projfile), "/")
     text = []
@@ -149,21 +203,15 @@ def generate(bluedir, projdir):
             info("%s -> %s" % (bluefile, projfile))
             _genmap[os.path.splitext(projfile)[1]](m.__dict__, projfile)
 
-def guess(projdir):
-    if projdir:
-        return projdir
-    if sys.platform.startswith("win32"):
-        projdir = "VStudio"
-    elif sys.platform.startswith("linux"):
-        projdir = "Linux"
-    return [os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), "..", "build", projdir))]
-
 def main():
+    builddir = os.path.relpath(os.path.join(os.path.dirname(sys.argv[0]), "..", "build"), os.getcwd())
     p = argparse.ArgumentParser()
-    p.add_argument("bluedir", help="blueprint directory")
-    p.add_argument("projdirs", metavar="projdir", nargs="*", help="project directory")
+    p.add_argument("bluedir", nargs="?", help="blueprint directory",
+        default=os.path.join(builddir, "Blueprints"))
+    p.add_argument("projdirs", metavar="projdir", nargs="*", help="project directory",
+        default=[os.path.join(builddir, n) for n in ["VStudio", "Linux"]])
     args = p.parse_args(sys.argv[1:])
-    for projdir in guess(args.projdirs):
+    for projdir in args.projdirs:
         generate(args.bluedir, projdir)
 
 def info(s):
