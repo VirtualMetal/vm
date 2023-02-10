@@ -28,14 +28,18 @@ def build_msbuild(args):
         break
     if args.verbose:
         subprocess.run(
-            [msbuild, slnfile, "-p:Configuration=" + args.config,
-                "-v:normal"],
+            [msbuild, slnfile,
+                "-v:normal",
+                "-p:Configuration=" + args.config],
             cwd=args.projdir,
             check=True)
     else:
         with subprocess.Popen(
-            [msbuild, slnfile, "-p:Configuration=" + args.config,
-                "-nologo", "-clp:NoSummary;ShowProjectFile=false;ForceConsoleColor;ForceNoAlign", "-v:normal"],
+            [msbuild, slnfile,
+                "-nologo",
+                "-v:normal",
+                "-clp:NoSummary;ShowProjectFile=false;ForceConsoleColor;ForceNoAlign",
+                "-p:Configuration=" + args.config],
             cwd=args.projdir,
             text=True, encoding="utf-8", stdout=subprocess.PIPE) as pipe:
             color = "OFF"
@@ -85,8 +89,9 @@ def build_msbuild(args):
 
 def build_make(args):
     subprocess.run(
-        ["make", "--no-print-directory", "Configuration=" + args.config,
-            "MakeQuiet=" if args.verbose else ("MakeQuiet=@$(if $(1),echo \"%s$(1)\" && ,)" % _indent)],
+        ["make", "--no-print-directory", "-j%s" % os.cpu_count(), "--output-sync=recurse",
+            "MakeQuiet=" if args.verbose else ("MakeQuiet=@$(if $(1),echo \"%s$(1)\" && ,)" % _indent),
+            "Configuration=" + args.config],
         cwd=args.projdir,
         check=True)
 
