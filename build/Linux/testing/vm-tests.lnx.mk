@@ -12,7 +12,7 @@ Compile = \
 	../../../src/vm/result.c \
 	../../../src/vm/run.c \
 	../../../src/vm/textconf.c \
-	../../../src/vm/vm_linux.c \
+	../../../src/vm/vm-lnx.c \
 	../../../tst/vm-tests/debug-test.c \
 	../../../tst/vm-tests/run-test.c \
 	../../../tst/vm-tests/textconf-test.c \

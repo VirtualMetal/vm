@@ -3,7 +3,7 @@
 import argparse, glob, os, sys, types
 import xml.etree.ElementTree as ET
 
-well_known_tags = { "darwin", "linux", "windows" }
+well_known_tags = { "win", "lnx", "mac" }
 
 def rglob(rootdir, pattern):
     return glob.iglob(os.path.join(rootdir, pattern), recursive=True)
@@ -67,7 +67,7 @@ def matchtag(requested_tags, is_wildcard, path):
     #
     b, ext = os.path.splitext(os.path.basename(path))
     if is_wildcard:
-        i = b.rfind("_")
+        i = b.rfind("-")
         if 0 <= i and b[i + 1:] in well_known_tags and not b[i + 1:] in requested_tags:
             return False
     has_build_line = False
@@ -116,15 +116,15 @@ def setelements(root, tag, files):
             j.set("Include", f)
 
 def generate_vcxproj(bluedict, projfile):
-    tags = { "windows" }
+    tags = { "win" }
     tags.update(bluedict.get("Tags", []))
     ET.register_namespace("", "http://schemas.microsoft.com/developer/msbuild/2003")
     tree = ET.parse(projfile)
     root = tree.getroot()
     for i in root.findall("{*}PropertyGroup/{*}ApplicationType"):
         if "Linux" == i.text:
-            tags.remove("windows")
-            tags.add("linux")
+            tags.remove("win")
+            tags.add("lnx")
     srcfiles = getfiles(tags, bluedict.get("Compile"), os.path.dirname(projfile), "\\")
     incfiles = getfiles(tags, bluedict.get("Include"), os.path.dirname(projfile), "\\")
     reffiles = getfiles(tags, bluedict.get("Refer"), os.path.dirname(projfile), "\\")
@@ -153,7 +153,7 @@ def iterate_lines_with_continuation(iter):
         yield " ".join(accum)
 
 def generate_mk(bluedict, projfile):
-    tags = { "linux" }
+    tags = { "lnx" }
     tags.update(bluedict.get("Tags", []))
     srcfiles = getfiles(tags, bluedict.get("Compile"), os.path.dirname(projfile), "/")
     incfiles = getfiles(tags, bluedict.get("Include"), os.path.dirname(projfile), "/")

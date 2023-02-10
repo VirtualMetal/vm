@@ -1,5 +1,5 @@
 /**
- * @file vm/vm_linux.c
+ * @file vm/vm-lnx.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */

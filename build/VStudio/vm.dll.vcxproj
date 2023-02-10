@@ -85,7 +85,7 @@
     <ClCompile Include="..\..\src\vm\result.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
     <ClCompile Include="..\..\src\vm\textconf.c" />
-    <ClCompile Include="..\..\src\vm\vm_windows.c" />
+    <ClCompile Include="..\..\src\vm\vm-win.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\vm\library.def" />

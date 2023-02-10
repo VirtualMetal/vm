@@ -1,5 +1,5 @@
 /**
- * @file vm/vm_windows.c
+ * @file vm/vm-win.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */

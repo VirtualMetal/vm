@@ -65,7 +65,7 @@
     <ClCompile Include="..\..\src\vm\result.c" />
     <ClCompile Include="..\..\src\vm\run.c" />
     <ClCompile Include="..\..\src\vm\textconf.c" />
-    <ClCompile Include="..\..\src\vm\vm_linux.c" />
+    <ClCompile Include="..\..\src\vm\vm-lnx.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

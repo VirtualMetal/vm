@@ -10,7 +10,7 @@ Compile = \
 	../../src/vm/result.c \
 	../../src/vm/run.c \
 	../../src/vm/textconf.c \
-	../../src/vm/vm_linux.c
+	../../src/vm/vm-lnx.c
 Incdirs = ../../src ../../inc
 
 include common.inc
