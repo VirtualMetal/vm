@@ -1,21 +1,52 @@
 #!/usr/bin/python
 
-import argparse, glob, os, re, subprocess, sys
+import argparse, glob, os, re, subprocess, sys, tempfile
 
 _indent = "  "
-_colormap = {
-    "36;1": "HDG", # cyan bold
-    "32;1": "SUM", # green bold
-    "31;1": "ERR", # red bold
-    "33;1": "WRN", # yellow bold
-    "30;1": "INF", # black bold
-    "37"  : "INF", # white
-    ""    : "OFF",
-}
-_statemap = {
-    "CMP": "compile",
-    "LNK": "link",
-}
+
+def iterloglines(proc, pattern):
+    logs = []
+    indx = 0
+    file = None
+    done = False
+    try:
+        while not done:
+            try:
+                proc.wait(0.5)
+                done = True
+            except subprocess.TimeoutExpired:
+                pass
+            newlogs = set(glob.iglob(pattern)).difference(logs)
+            logs.extend(sorted(newlogs))
+            loop = True
+            while loop and len(logs) > indx:
+                if "build.log" == os.path.basename(logs[indx]):
+                    indx += 1
+                    continue
+                if not file:
+                    file = open(logs[indx], "rt", encoding="utf-8")
+                    prev = ""
+                loop = done
+                for line in file:
+                    if done or line.endswith("\n"):
+                        yield prev + line
+                        prev = ""
+                        if "Done Building Project" in line:
+                            loop = True
+                            break
+                    else:
+                        prev += line
+                        break
+                if loop:
+                    file.close()
+                    file = None
+                    indx += 1
+    finally:
+        if file:
+            file.close()
+
+_line_re = re.compile(r"^([ \t]*)(?:\d+>)?(.*?)(?: *[(][^:]+:\d+[)])?$")
+_fail_re = re.compile(r"^(?:[A-Za-z]:)?[^:]+: *(?:error|warning)")
 def build_msbuild(args):
     msbuild = subprocess.run(
         [os.environ["ProgramFiles(x86)"] + "\\Microsoft Visual Studio\\Installer\\vswhere.exe",
@@ -26,70 +57,64 @@ def build_msbuild(args):
     for slnfile in glob.iglob(os.path.join(args.projdir, "*.sln")):
         slnfile = os.path.relpath(slnfile, args.projdir)
         break
-    if args.verbose:
-        subprocess.run(
-            [msbuild, slnfile,
-                "-v:normal",
-                "-p:Configuration=" + args.config],
-            cwd=args.projdir,
-            check=True)
-    else:
+    with tempfile.TemporaryDirectory() as tempdir:
         with subprocess.Popen(
             [msbuild, slnfile,
+                "-m:%s" % os.cpu_count(),
                 "-nologo",
+                "-noconlog",
                 "-v:normal",
-                "-clp:NoSummary;ShowProjectFile=false;ForceConsoleColor;ForceNoAlign",
+                "-dfl",
+                "-flp:LogFile=%s;Encoding=UTF-8;Verbosity=normal;NoSummary" % os.path.join(tempdir, "build.log"),
                 "-p:Configuration=" + args.config],
-            cwd=args.projdir,
-            text=True, encoding="utf-8", stdout=subprocess.PIPE) as pipe:
-            color = "OFF"
-            state = ""
-            for line in pipe.stdout:
+            cwd=args.projdir) as proc:
+            state, level = "", 0
+            for line in iterloglines(proc, os.path.join(tempdir, "build*.log")):
                 line = line.rstrip()
-                level = -1
-                for span in re.split("(\x1b\\[[0-9;]*m)", line):
-                    if span.startswith("\x1b"):
-                        color = _colormap[span[2:-1]]
-                        continue
-                    if not span:
-                        continue
-                    if -1 == level:
-                        level = int(span.startswith(" "))
-                    span = span.lstrip()
-                    if False:
-                        # set True to debug parser
-                        sys.stdout.write("%s |%s%s\n" % (color, _indent if 0 < level else "", span))
-                    elif "HDG" == color:
-                        state = ""
-                        if span.startswith("Project ") and " is building " in span:
-                            parts = span.split("\"")
-                            if 5 == len(parts):
-                                sys.stdout.write("%s:\n" % os.path.basename(parts[3]))
-                        elif span.startswith("ClCompile:"):
-                            state = "CMP"
-                        elif span.startswith("Link:"):
-                            state = "LNK"
-                    elif "INF" == color:
-                        if span.startswith("All outputs are up-to-date"):
-                            state = ""
-                    elif "OFF" == color and 0 < level:
-                        if "CMP" == state:
-                            if " " not in span:
-                                sys.stdout.write("%s%s %s\n" % (_indent, _statemap[state], span))
-                        elif "LNK" == state:
-                            if "->" in span:
-                                parts = span.split("->")
-                                if 2 == len(parts):
-                                    sys.stdout.write("%s%s %s\n" % (_indent, _statemap[state], os.path.basename(parts[1])))
-                    elif "ERR" == color or "WRN" == color:
-                        sys.stdout.write("%s\n" % span)
-            exitcode = pipe.wait()
+                if line.startswith("Logging verbosity "):
+                    i = line.find("1>Project")
+                    if 0 <= i:
+                        line = "     " + line[i:]
+                if args.verbose:
+                    print(line)
+                    continue
+                m = _line_re.search(line)
+                line_level = 0
+                if m:
+                    line_level = len(m.group(1))
+                    line = m.group(2)
+                if line.startswith("Project "):
+                    parts = line.split("\"")
+                    if 5 == len(parts):
+                        print("%s:" % os.path.basename(parts[3]))
+                    elif 3 == len(parts) and not parts[1].endswith(".sln"):
+                        print("%s:" % os.path.basename(parts[1]))
+                elif line.startswith("ClCompile:"):
+                    state, level = "compile", line_level
+                elif line.startswith("Link:"):
+                    state, level = "link", line_level
+                elif _fail_re.search(line):
+                    print(line)
+                elif line_level <= level or line.startswith("All outputs are up-to-date"):
+                    state, level = "", 0
+                elif "compile" == state:
+                    if " " not in line:
+                        print("%s%s %s" % (_indent, state, line))
+                elif "link" == state:
+                    if "->" in line:
+                        parts = line.split("->")
+                        if 2 == len(parts):
+                            print("%s%s %s" % (_indent, state, os.path.basename(parts[1])))
+            exitcode = proc.wait()
             if exitcode:
-                raise subprocess.CalledProcessError(exitcode, pipe.args)
+                raise subprocess.CalledProcessError(exitcode, proc.args)
 
 def build_make(args):
     subprocess.run(
-        ["make", "--no-print-directory", "-j%s" % os.cpu_count(), "--output-sync=recurse",
+        ["make",
+            "-j%s" % os.cpu_count(),
+            "--no-print-directory",
+            "--output-sync=recurse",
             "MakeQuiet=" if args.verbose else ("MakeQuiet=@$(if $(1),echo \"%s$(1)\" && ,)" % _indent),
             "Configuration=" + args.config],
         cwd=args.projdir,
