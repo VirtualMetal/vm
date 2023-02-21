@@ -2141,7 +2141,7 @@ vm_result_t vm_debug_server_start(vm_t *instance,
     memset(debug_server, 0, sizeof *debug_server);
     debug_server->socket = INVALID_SOCKET;
     debug_server->event = WSACreateEvent();
-    debug_server->stop_event = WSACreateEvent();
+    debug_server->stop_event = CreateEvent(0, FALSE, FALSE, 0);
     if (WSA_INVALID_EVENT == debug_server->event ||
         WSA_INVALID_EVENT == debug_server->stop_event)
     {
