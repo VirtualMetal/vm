@@ -2,9 +2,12 @@ Include = \
 	../../inc/vm/vm.h \
 	../../src/arch/arch.h \
 	../../src/arch/x64.h \
+	../../src/vm/guest/guest.h \
 	../../src/vm/internal.h
 Compile = \
 	../../src/vm/gdb.c \
+	../../src/vm/guest/guest.c \
+	../../src/vm/guest/linux.c \
 	../../src/vm/load.c \
 	../../src/vm/program.c \
 	../../src/vm/result.c \

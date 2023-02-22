@@ -13,7 +13,16 @@
 
 #include <vm/internal.h>
 
+static vm_result_t vm_runcmd_dispatch(void *context, vm_runcmd_t *runcmds,
+    char phase, bmap_t *valid, unsigned index, char *p);
+
 vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance)
+{
+    return vm_run_ex(default_config, tconfigv, 0, pinstance);
+}
+
+vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_runcmd_t *runcmds,
+    vm_t **pinstance)
 {
     /* command/command-with-index macros */
 #define CMD(S)\
@@ -39,7 +48,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
     unsigned invalid_index;
     bmap_t valid[bmap_declcount(4096)];
     vm_t *instance = 0;
-    vm_count_t guest_address, length, count, page_address;
+    vm_count_t guest_address, length, count, stride, page_address;
     vm_mmap_t *map;
     char debug_hostbuf[256], *debug_host = 0, *debug_port = 0;
     vm_count_t debug_break = 0;
@@ -66,6 +75,9 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             bmap_set(valid, (unsigned)(pp - tconfigv), 1);
     }
 
+    /*
+     * Create configuration
+     */
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
         if (CMD("log"))
@@ -90,6 +102,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
         {
             config.vcpu_count = strtoullint(p, &p, +1);
             CHK('\0' == *p);
+            CHK(VM_CONFIG_VCPU_COUNT_MAX >= config.vcpu_count);
         }
         else
         if (CMD("passthrough"))
@@ -103,12 +116,22 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             config.vpic = !!strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
+        else
+        {
+            result = vm_runcmd_dispatch(&config, runcmds,
+                VM_RUNCMD_PHASE_CREATE, valid, (unsigned)(pp - tconfigv), p);
+            if (!vm_result_check(result))
+                goto exit;
+        }
     }
 
     result = vm_create(&config, &instance);
     if (!vm_result_check(result))
         goto exit;
 
+    /*
+     * Memory configuration
+     */
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
         if (CMD("mmap"))
@@ -161,8 +184,18 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             if (!vm_result_check(result))
                 goto exit;
         }
+        else
+        {
+            result = vm_runcmd_dispatch(instance, runcmds,
+                VM_RUNCMD_PHASE_MEMORY, valid, (unsigned)(pp - tconfigv), p);
+            if (!vm_result_check(result))
+                goto exit;
+        }
     }
 
+    /*
+     * Start configuration
+     */
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
         if (CMD("vcpu_entry"))
@@ -189,8 +222,24 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
         if (CMD("vcpu_table"))
         {
             config.vcpu_table = strtoullint(p, &p, +1);
-            CHK('\0' == *p);
+            CHK(',' == *p || '\0' == *p);
+            if (',' == *p)
+            {
+                stride = strtoullint(p + 1, &p, +1);
+                CHK('\0' == *p);
+            }
+            else
+                stride = 0;
+            config.vcpu_table &= ~0xff;
+            config.vcpu_table |= stride & 0xff;
             vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_table));
+        }
+        else
+        if (CMD("vcpu_mailbox"))
+        {
+            config.vcpu_mailbox = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_mailbox));
         }
         else
         if (CMD("page_table") || CMD("pg0"))
@@ -283,6 +332,13 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
             debug_break = strtoullint(p, &p, +1);
             CHK('\0' == *p);
         }
+        else
+        {
+            result = vm_runcmd_dispatch(instance, runcmds,
+                VM_RUNCMD_PHASE_START, valid, (unsigned)(pp - tconfigv), p);
+            if (!vm_result_check(result))
+                goto exit;
+        }
     }
 
     invalid_index = bmap_find(valid, bmap_capacity(valid), 0);
@@ -334,4 +390,25 @@ exit:
 #undef CHK
 #undef PGO
 #undef PGL
+}
+
+static vm_result_t vm_runcmd_dispatch(void *context, vm_runcmd_t *runcmds,
+    char phase, bmap_t *valid, unsigned index, char *p)
+{
+    vm_result_t result = VM_RESULT_SUCCESS;
+    for (vm_runcmd_t *runcmd = runcmds; runcmd && runcmd->name; runcmd++)
+        if (VM_RUNCMD_PHASE_ALL == runcmd->name[0] || phase == runcmd->name[0])
+        {
+            size_t len = strlen(runcmd->name + 1);
+            if ((0 == invariant_strncmp(p, runcmd->name + 1, len)) &&
+                (('=' == p[len] && (bmap_set(valid, index, 1), p += len + 1)) ||
+                ('\0' == p[len] && (bmap_set(valid, index, 1), p = "1"))))
+            {
+                result = runcmd->fn(context, runcmd, phase, p);
+                if (VM_ERROR_CONFIG == vm_result_error(result))
+                    result = vm_result(VM_ERROR_CONFIG, index + 1);
+                break;
+            }
+        }
+    return result;
 }

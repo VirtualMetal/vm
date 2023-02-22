@@ -37,7 +37,7 @@
 # Logging enable/disable.
 #log=(0|1)
 
-# Logging flags. See VM_CONFIG_LOG_* in vm/vm.h
+# Logging flags. See VM_CONFIG_LOG* in vm/vm.h
 #log_flags=<flags>
 
 # Virtual CPU count. Count of 0 specifies all CPU's available.
@@ -69,7 +69,10 @@
 #vcpu_args=<arg>[,<arg>...]
 
 # Virtual CPU table.
-#vcpu_table=<address>
+#vcpu_table=<address>[,<stride>]
+
+# Virtual CPU wakeup mailbox.
+#vcpu_mailbox=<address>
 
 # Root page table address (PML4).
 #page_table=<address>

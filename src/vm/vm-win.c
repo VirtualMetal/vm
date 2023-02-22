@@ -13,6 +13,7 @@
 
 #include <vm/internal.h>
 #include <winhvplatform.h>
+#include <winhvemulation.h>
 
 struct vm
 {
@@ -52,6 +53,13 @@ struct vm_mmap
         has_mapped_head:1,
         has_tail:1,
         has_mapped_tail:1;
+};
+
+struct vm_emulator_context
+{
+    vm_t *instance;
+    UINT32 vcpu_index;
+    vm_result_t result;
 };
 
 struct vm_debug
@@ -109,6 +117,30 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
+static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
+static HRESULT CALLBACK vm_emulator_pmio(
+    PVOID context,
+    WHV_EMULATOR_IO_ACCESS_INFO *io);
+static HRESULT CALLBACK vm_emulator_mmio(
+    PVOID context,
+    WHV_EMULATOR_MEMORY_ACCESS_INFO *mmio);
+static HRESULT CALLBACK vm_emulator_getregs(
+    PVOID context,
+    const WHV_REGISTER_NAME *regn,
+    UINT32 regc,
+    WHV_REGISTER_VALUE *regv);
+static HRESULT CALLBACK vm_emulator_setregs(
+    PVOID context,
+    const WHV_REGISTER_NAME *regn,
+    UINT32 regc,
+    const WHV_REGISTER_VALUE *regv);
+static HRESULT CALLBACK vm_emulator_translate(
+    PVOID context,
+    WHV_GUEST_VIRTUAL_ADDRESS guest_virtual_address,
+    WHV_TRANSLATE_GVA_FLAGS flags,
+    WHV_TRANSLATE_GVA_RESULT_CODE *result,
+    WHV_GUEST_PHYSICAL_ADDRESS *pguest_address);
 static void vm_log_mmap(vm_t *instance);
 static void vm_log_vcpu_exit(vm_t *instance,
     UINT32 vcpu_index, WHV_RUN_VP_EXIT_CONTEXT *exit_context, vm_result_t result);
@@ -196,6 +228,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
     if (0 == vcpu_count)
         vcpu_count = 1;
+    else if (VM_CONFIG_VCPU_COUNT_MAX < vcpu_count)
+        vcpu_count = VM_CONFIG_VCPU_COUNT_MAX;
 
     hresult = WHvGetCapability(
         WHvCapabilityCodeHypervisorPresent, &hypervisor_present, sizeof hypervisor_present, 0);
@@ -247,6 +281,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    if (0 == instance->config.gmio)
+        instance->config.gmio = vm_default_gmio;
     instance->config.vcpu_count = vcpu_count;
     InitializeSRWLock(&instance->mmap_lock);
     list_init(&instance->mmap_list);
@@ -1218,8 +1254,20 @@ exit:
 
 static DWORD WINAPI vm_thread(PVOID instance0)
 {
+    static WHV_EMULATOR_CALLBACKS emulator_callbacks =
+    {
+        .Size = sizeof(WHV_EMULATOR_CALLBACKS),
+        .WHvEmulatorIoPortCallback = vm_emulator_pmio,
+        .WHvEmulatorMemoryCallback = vm_emulator_mmio,
+        .WHvEmulatorGetVirtualProcessorRegisters = vm_emulator_getregs,
+        .WHvEmulatorSetVirtualProcessorRegisters = vm_emulator_setregs,
+        .WHvEmulatorTranslateGvaPage = vm_emulator_translate,
+    };
     vm_result_t result;
     vm_t *instance = instance0;
+    WHV_EMULATOR_HANDLE emulator = 0;
+    WHV_EMULATOR_STATUS emulator_status;
+    struct vm_emulator_context emulator_context;
     UINT32 vcpu_index;
     BOOL has_vcpu = FALSE;
     BOOL is_terminated, has_debug_event, has_debug_log;
@@ -1228,6 +1276,13 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     HRESULT hresult;
 
     vcpu_index = (UINT32)(instance->config.vcpu_count - instance->thread_count);
+
+    hresult = WHvEmulatorCreateEmulator(&emulator_callbacks, &emulator);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
 
     hresult = WHvCreateVirtualProcessor(instance->partition, vcpu_index, 0);
     if (FAILED(hresult))
@@ -1269,6 +1324,9 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     if (!vm_result_check(result))
         goto exit;
 
+    emulator_context.instance = instance;
+    emulator_context.vcpu_index = vcpu_index;
+
     has_debug_log = !!instance->config.logf &&
         0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
 
@@ -1293,11 +1351,37 @@ static DWORD WINAPI vm_thread(PVOID instance0)
         switch (exit_context.ExitReason)
         {
         case WHvRunVpExitReasonX64IoPortAccess:
-            result = vm_result(VM_ERROR_VCPU, 0);
+            hresult = WHvEmulatorTryIoEmulation(emulator, &emulator_context,
+                &exit_context.VpContext, &exit_context.IoPortAccess,
+                &emulator_status);
+            if (FAILED(hresult))
+            {
+                result = vm_result(VM_ERROR_VCPU, hresult);
+                goto exit;
+            }
+            else if (!emulator_status.EmulationSuccessful)
+            {
+                result = emulator_status.IoPortCallbackFailed ?
+                    emulator_context.result : vm_result(VM_ERROR_VCPU, 0);
+                goto exit;
+            }
             break;
 
         case WHvRunVpExitReasonMemoryAccess:
-            result = vm_result(VM_ERROR_VCPU, 0);
+            hresult = WHvEmulatorTryMmioEmulation(emulator, &emulator_context,
+                &exit_context.VpContext, &exit_context.MemoryAccess,
+                &emulator_status);
+            if (FAILED(hresult))
+            {
+                result = vm_result(VM_ERROR_VCPU, hresult);
+                goto exit;
+            }
+            else if (!emulator_status.EmulationSuccessful)
+            {
+                result = emulator_status.MemoryCallbackFailed ?
+                    emulator_context.result : vm_result(VM_ERROR_VCPU, 0);
+                goto exit;
+            }
             break;
 
 #if defined(_M_X64)
@@ -1359,6 +1443,9 @@ exit:
 
     if (has_vcpu)
         WHvDeleteVirtualProcessor(instance->partition, vcpu_index);
+
+    if (0 != emulator)
+        WHvEmulatorDestroyEmulator(emulator);
 
     return 0;
 }
@@ -1517,8 +1604,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
 #if defined(_M_X64)
     vm_result_t result;
     void *page = 0;
-    vm_count_t length;
-    vm_count_t cpu_data_address;
+    vm_count_t vcpu_table, stride, length, cpu_data_address;
+    vm_count_t vcpu_entry, vcpu_args[6];
     struct arch_x64_seg_desc seg_desc;
     struct arch_x64_sseg_desc sseg_desc;
     WHV_REGISTER_NAME regn[128];
@@ -1533,7 +1620,9 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         goto exit;
     }
 
-    cpu_data_address = instance->config.vcpu_table + vcpu_index * sizeof(struct arch_x64_cpu_data);
+    vcpu_table = instance->config.vcpu_table & ~0xff;
+    stride = instance->config.vcpu_table & 0xff;
+    cpu_data_address = vcpu_table + vcpu_index * stride * sizeof(struct arch_x64_cpu_data);
     arch_x64_cpu_data_init(page, cpu_data_address);
     length = sizeof(struct arch_x64_cpu_data);
     vm_mwrite(instance, page, cpu_data_address, &length);
@@ -1543,24 +1632,45 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
         goto exit;
     }
 
+    if (0 == vcpu_index || 0 == instance->config.vcpu_mailbox)
+    {
+        vcpu_entry = instance->config.vcpu_entry;
+        vcpu_args[0] = instance->config.vcpu_args[0];
+        vcpu_args[1] = instance->config.vcpu_args[1];
+        vcpu_args[2] = instance->config.vcpu_args[2];
+        vcpu_args[3] = instance->config.vcpu_args[3];
+        vcpu_args[4] = instance->config.vcpu_args[4];
+        vcpu_args[5] = instance->config.vcpu_args[5];
+    }
+    else
+    {
+        vcpu_entry = (vm_count_t)&((struct arch_x64_cpu_data *)cpu_data_address)->wakeup.code;
+        vcpu_args[0] = instance->config.vcpu_mailbox;
+        vcpu_args[1] = ((vm_count_t)vcpu_index << 32) | 1;
+        vcpu_args[2] = 0;
+        vcpu_args[3] = 0;
+        vcpu_args[4] = 0;
+        vcpu_args[5] = 0;
+    }
+
     regc = 0;
     REGSET(Rax) = REGVAL(0);
-    REGSET(Rcx) = REGVAL(instance->config.vcpu_args[3]);
-    REGSET(Rdx) = REGVAL(instance->config.vcpu_args[2]);
+    REGSET(Rcx) = REGVAL(vcpu_args[3]);
+    REGSET(Rdx) = REGVAL(vcpu_args[2]);
     REGSET(Rbx) = REGVAL(0);
     REGSET(Rsp) = REGVAL(0);
     REGSET(Rbp) = REGVAL(0);
-    REGSET(Rsi) = REGVAL(instance->config.vcpu_args[1]);
-    REGSET(Rdi) = REGVAL(instance->config.vcpu_args[0]);
-    REGSET(R8) = REGVAL(instance->config.vcpu_args[4]);
-    REGSET(R9) = REGVAL(instance->config.vcpu_args[5]);
+    REGSET(Rsi) = REGVAL(vcpu_args[1]);
+    REGSET(Rdi) = REGVAL(vcpu_args[0]);
+    REGSET(R8) = REGVAL(vcpu_args[4]);
+    REGSET(R9) = REGVAL(vcpu_args[5]);
     REGSET(R10) = REGVAL(0);
     REGSET(R11) = REGVAL(0);
     REGSET(R12) = REGVAL(0);
     REGSET(R13) = REGVAL(0);
     REGSET(R14) = REGVAL(0);
     REGSET(R15) = REGVAL(0);
-    REGSET(Rip) = REGVAL(.Reg64 = instance->config.vcpu_entry);
+    REGSET(Rip) = REGVAL(.Reg64 = vcpu_entry);
     REGSET(Rflags) = REGVAL(.Reg64 = 2);
 
     seg_desc = ((struct arch_x64_cpu_data *)page)->gdt.km_cs;
@@ -1983,6 +2093,77 @@ static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
 
 exit:
     return result;
+}
+
+static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
+{
+    return vm_result(VM_ERROR_VCPU, 0);
+}
+
+static HRESULT CALLBACK vm_emulator_pmio(
+    PVOID context0,
+    WHV_EMULATOR_IO_ACCESS_INFO *io)
+{
+    struct vm_emulator_context *context = context0;
+    vm_t *instance = context->instance;
+    context->result = instance->config.gmio(instance->config.user_context, context->vcpu_index,
+        VM_GMIO_PMIO | io->Direction, io->Port, io->AccessSize, &io->Data);
+    return vm_result_check(context->result) ? S_OK : E_FAIL;
+}
+
+static HRESULT CALLBACK vm_emulator_mmio(
+    PVOID context0,
+    WHV_EMULATOR_MEMORY_ACCESS_INFO *mmio)
+{
+    struct vm_emulator_context *context = context0;
+    vm_t *instance = context->instance;
+    context->result = instance->config.gmio(instance->config.user_context, context->vcpu_index,
+        VM_GMIO_MMIO | mmio->Direction, mmio->GpaAddress, mmio->AccessSize, &mmio->Data);
+    return vm_result_check(context->result) ? S_OK : E_FAIL;
+}
+
+static HRESULT CALLBACK vm_emulator_getregs(
+    PVOID context0,
+    const WHV_REGISTER_NAME *regn,
+    UINT32 regc,
+    WHV_REGISTER_VALUE *regv)
+{
+    struct vm_emulator_context *context = context0;
+    vm_t *instance = context->instance;
+    return WHvGetVirtualProcessorRegisters(instance->partition,
+        context->vcpu_index, regn, regc, regv);
+}
+
+static HRESULT CALLBACK vm_emulator_setregs(
+    PVOID context0,
+    const WHV_REGISTER_NAME *regn,
+    UINT32 regc,
+    const WHV_REGISTER_VALUE *regv)
+{
+    struct vm_emulator_context *context = context0;
+    vm_t *instance = context->instance;
+    return WHvSetVirtualProcessorRegisters(instance->partition,
+        context->vcpu_index, regn, regc, regv);
+}
+
+static HRESULT CALLBACK vm_emulator_translate(
+    PVOID context0,
+    WHV_GUEST_VIRTUAL_ADDRESS guest_virtual_address,
+    WHV_TRANSLATE_GVA_FLAGS flags,
+    WHV_TRANSLATE_GVA_RESULT_CODE *result,
+    WHV_GUEST_PHYSICAL_ADDRESS *pguest_address)
+{
+    struct vm_emulator_context *context = context0;
+    vm_t *instance = context->instance;
+    WHV_TRANSLATE_GVA_RESULT translation;
+    HRESULT hresult;
+    hresult = WHvTranslateGva(instance->partition,
+        context->vcpu_index, guest_virtual_address, flags, &translation, pguest_address);
+    if (FAILED(hresult))
+        return hresult;
+    *result = translation.ResultCode;
+    return hresult;
 }
 
 static void vm_log_mmap(vm_t *instance)

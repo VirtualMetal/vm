@@ -27,6 +27,7 @@
 #endif
 
 #include <vm/vm.h>
+#include <vm/guest/guest.h>
 #include <arch/arch.h>
 
 #if defined(_WIN64)
@@ -35,6 +36,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <psapi.h>
+#include <stdint.h>
 
 /*
  * memory operations

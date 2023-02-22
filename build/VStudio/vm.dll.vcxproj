@@ -46,7 +46,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhvplatform.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
@@ -64,7 +64,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhvplatform.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
@@ -76,10 +76,13 @@
     <ClInclude Include="..\..\inc\vm\vm.h" />
     <ClInclude Include="..\..\src\arch\arch.h" />
     <ClInclude Include="..\..\src\arch\x64.h" />
+    <ClInclude Include="..\..\src\vm\guest\guest.h" />
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\gdb.c" />
+    <ClCompile Include="..\..\src\vm\guest\guest.c" />
+    <ClCompile Include="..\..\src\vm\guest\linux.c" />
     <ClCompile Include="..\..\src\vm\library.c" />
     <ClCompile Include="..\..\src\vm\load.c" />
     <ClCompile Include="..\..\src\vm\result.c" />

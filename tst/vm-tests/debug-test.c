@@ -92,7 +92,7 @@ static void vm_debug_mp_test(void)
         "pg0=0x1000",
         "pg1=0x2003",
         "pg2=0x0083,512",
-        "vcpu_table=0x3000",
+        "vcpu_table=0x3000,1",
         "vcpu_entry=0x0000",
         "data=0,4,0xeb,0xfe,0x90,0xf4", /* jmp 0; nop; hlt */
         0,
@@ -288,7 +288,7 @@ static void vm_debug_cpuid_test(void)
         "pg0=0x1000",
         "pg1=0x2003",
         "pg2=0x0083,512",
-        "vcpu_table=0x3000",
+        "vcpu_table=0x3000,1",
         "vcpu_entry=0x0000",
         "data=0,9,0xb8,0x01,0x00,0x00,0x00,0x0f,0xa2,0xeb,0xfe", /* mov eax,1; cpuid; loop: jmp loop */
         0,

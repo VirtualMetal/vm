@@ -312,7 +312,7 @@ static void vm_run_terminate_test(void)
         "pg0=0x1000",
         "pg1=0x2003",
         "pg2=0x0083,512",
-        "vcpu_table=0x3000",
+        "vcpu_table=0x3000,1",
         "vcpu_entry=0x0000",
         "data=0,2,0xeb,0xfe",           /* jmp 0 */
         0,

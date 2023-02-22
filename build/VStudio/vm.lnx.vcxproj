@@ -56,10 +56,13 @@
     <ClInclude Include="..\..\inc\vm\vm.h" />
     <ClInclude Include="..\..\src\arch\arch.h" />
     <ClInclude Include="..\..\src\arch\x64.h" />
+    <ClInclude Include="..\..\src\vm\guest\guest.h" />
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\vm\gdb.c" />
+    <ClCompile Include="..\..\src\vm\guest\guest.c" />
+    <ClCompile Include="..\..\src\vm\guest\linux.c" />
     <ClCompile Include="..\..\src\vm\load.c" />
     <ClCompile Include="..\..\src\vm\program.c" />
     <ClCompile Include="..\..\src\vm\result.c" />

@@ -18,6 +18,12 @@
 extern "C" {
 #endif
 
+#ifdef __cplusplus
+#define VM_STATIC_ASSERT(E)             static_assert(E, #E)
+#else
+#define VM_STATIC_ASSERT(E)             _Static_assert(E, #E)
+#endif
+
 typedef long long vm_result_t;
 
 #define VM_RESULT_SUCCESS               (0LL)
@@ -45,39 +51,66 @@ const char *vm_result_error_string(vm_result_t result);
 
 typedef struct vm vm_t;
 typedef struct vm_config vm_config_t;
+typedef struct vm_runcmd vm_runcmd_t;
 typedef struct vm_mmap vm_mmap_t;
 typedef unsigned long long vm_count_t;
 
 struct vm_config
 {
-    /* immutable */
+    /* interface */
+    vm_result_t (*gmio)(void *user_context, vm_count_t vcpu_index,
+        vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
     void (*logf)(const char *format, ...);
+    vm_count_t reserved0[14];
+
+    /* immutable */
+    void *user_context;
     vm_count_t log_flags;
     vm_count_t compat_flags;
     vm_count_t vcpu_count;              /* number of virtual cpu's */
+    vm_count_t reserved1[11];
     vm_count_t passthrough:1;           /* pass through native hypervisor features */
     vm_count_t vpic:1;                  /* virtual PIC support */
-    vm_count_t reserved0[3];
 
     /* reconfigurable */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
     vm_count_t vcpu_args[6];            /* virtual cpu entry args */
-    vm_count_t vcpu_table;              /* virtual cpu data table address */
+    vm_count_t vcpu_table;              /* virtual cpu data table address / stride */
+    vm_count_t vcpu_mailbox;            /* virtual cpu wakeup mailbox (ACPI 6.4,5.2.12.19) */
     vm_count_t page_table;              /* page table address */
     vm_count_t exec_textseg;            /* executable file text segment address */
     vm_count_t exec_dataseg;            /* executable file data segment address */
-    vm_count_t reserved1[13];
+    vm_count_t reserved2[20];
 };
+VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 
 #define VM_CONFIG_INDEX(F)              ((vm_count_t)&((vm_config_t *)0)->F / sizeof(vm_count_t))
-#define VM_CONFIG_BIT(F)                ((vm_count_t)(1 << VM_CONFIG_INDEX(F)))
+#define VM_CONFIG_BIT(F)                ((vm_count_t)(1ULL << VM_CONFIG_INDEX(F)))
 #define VM_CONFIG_FIELD(C, I)           (*(vm_count_t *)((char *)(C) + I * sizeof(vm_count_t)))
-#define VM_CONFIG_RECONFIG_MASK         ((vm_count_t)0xffffff00ULL)
+#define VM_CONFIG_RECONFIG_MASK         ((vm_count_t)0xffffffff00000000ULL)
 
-#define VM_CONFIG_LOG_HYPERVISOR        1
-#define VM_CONFIG_LOG_DEBUGSERVER       0x80000000
+#define VM_CONFIG_LOG_HYPERVISOR        0x40000000              /* log all hypervisor exits */
+#define VM_CONFIG_LOG_DEBUGSERVER       0x80000000              /* log debug server protocol */
 
 #define VM_CONFIG_COMPAT_WHV_DEBUG      0x80000000
+
+#define VM_CONFIG_VCPU_COUNT_MAX        64
+
+#define VM_GMIO_RD                      0
+#define VM_GMIO_WR                      1
+#define VM_GMIO_MMIO                    0
+#define VM_GMIO_PMIO                    2
+
+struct vm_runcmd
+{
+    const char *name;                   /* format: phase=(*|C|M|S), name; e.g. "Mlinux" */
+    vm_result_t (*fn)(void *context, vm_runcmd_t *runcmd, char phase, const char *value);
+};
+
+#define VM_RUNCMD_PHASE_ALL             '*'
+#define VM_RUNCMD_PHASE_CREATE          'C'     /* context is vm_config_t */
+#define VM_RUNCMD_PHASE_MEMORY          'M'     /* context is vm_t */
+#define VM_RUNCMD_PHASE_START           'S'     /* context is vm_t */
 
 /**
  * Run a VM instance with the specified text configuration.
@@ -92,6 +125,23 @@ struct vm_config
  *     VM_RESULT_SUCCESS or error code.
  */
 vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance);
+
+/**
+ * Run a VM instance with the specified text configuration and custom configuration commands.
+ *
+ * This function creates, configures and starts a new VM instance.
+ *
+ * @param default_config
+ *     The default base configuration to use.
+ * @param tconfigv
+ *     The text configuration to use.
+ * @param runcmds
+ *     The custom configuration commands.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_runcmd_t *runcmds,
+    vm_t **pinstance);
 
 /**
  * Create a new VM instance with the specified configuration.
@@ -282,8 +332,7 @@ vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t ma
  * Start a VM instance.
  *
  * This function starts and runs the instance virtual CPU's. It handles
- * virtual CPU "exits" and forwards them to the appropriate vm_interface_t
- * methods.
+ * virtual CPU "exits" and forwards them to the appropriate exit method.
  *
  * This function is thread-safe if instance remains valid during the call.
  *

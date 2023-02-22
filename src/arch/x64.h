@@ -20,6 +20,7 @@
  * - [INT] Intel 64 and IA-32 Architectures Software Developers Manual Volume 3:
  * System Programming Guide
  * - [AMD] AMD64 Architecture Programmers Manual Volume 2: System Programming
+ * - [ACPI] Advanced Configuration and Power Interface (ACPI) Specification Release 6.4
  */
 
 /* segment descriptor - [INT 3.4.5], [AMD 4.8.1,4.8.2] */
@@ -145,13 +146,20 @@ struct arch_x64_idt
 };
 ARCH_STATIC_ASSERT(4096 == sizeof(struct arch_x64_idt));
 
+/* wakeup wait - [ACPI 5.2.12.19] */
+struct arch_x64_wakeup
+{
+    arch_u8_t code[24];
+};
+ARCH_STATIC_ASSERT(24 == sizeof(struct arch_x64_wakeup));
+
 /* CPU data */
 struct arch_x64_cpu_data
 {
     ARCH_ALIGN(64) arch_u64_t km_stack[488];
     ARCH_ALIGN(64) struct arch_x64_gdt gdt;
     ARCH_ALIGN(64) struct arch_x64_tss tss;
-    arch_u64_t data[3];
+    struct arch_x64_wakeup wakeup;
 };
 ARCH_STATIC_ASSERT(4096 == sizeof(struct arch_x64_cpu_data));
 
@@ -222,12 +230,29 @@ void arch_x64_tss_init(struct arch_x64_tss *tss)
 }
 
 static inline
+void arch_x64_wakeup_init(struct arch_x64_wakeup *wakeup)
+{
+    *wakeup = (struct arch_x64_wakeup)
+        {
+            .code =
+                "\xF3\x90"              /* spin:    pause */
+                "\x48\x39\x37"          /*          cmp [rdi],rsi */
+                "\x75\xF9"              /*          jne spin */
+                "\x48\x31\xF6"          /*          xor rsi,rsi */
+                "\x48\x8B\x47\x08"      /*          mov rax,[rdi+8] */
+                "\x48\x87\x37"          /*          xchg [rdi],rsi */
+                "\xFF\xE0"              /*          jmp rax */
+        };
+}
+
+static inline
 void arch_x64_cpu_data_init(struct arch_x64_cpu_data *cpu_data, arch_u64_t address)
 {
     arch_u64_t offset;
 
     arch_x64_gdt_init(&cpu_data->gdt);
     arch_x64_tss_init(&cpu_data->tss);
+    arch_x64_wakeup_init(&cpu_data->wakeup);
 
     offset = (arch_u64_t)&((struct arch_x64_cpu_data *)0)->tss;
     cpu_data->gdt.tss.address0 = (arch_u32_t)((address + offset) & ((1 << 24) - 1));
@@ -237,10 +262,6 @@ void arch_x64_cpu_data_init(struct arch_x64_cpu_data *cpu_data, arch_u64_t addre
     offset = (arch_u64_t)&((struct arch_x64_cpu_data *)0)->km_stack + sizeof cpu_data->km_stack;
     cpu_data->tss.rsp[0][0] = (arch_u32_t)(address + offset);
     cpu_data->tss.rsp[0][1] = (arch_u32_t)((address + offset) >> 32);
-
-    cpu_data->data[0] = 0;
-    cpu_data->data[1] = 0;
-    cpu_data->data[2] = 0;
 }
 
 #endif

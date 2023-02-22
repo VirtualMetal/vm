@@ -3,11 +3,14 @@ Include = \
 	../../../src/arch/arch.h \
 	../../../src/arch/x64.h \
 	../../../src/tlib/testsuite.h \
+	../../../src/vm/guest/guest.h \
 	../../../src/vm/internal.h \
 	../../../tst/vm-tests/vm-tests.h
 Compile = \
 	../../../src/tlib/testsuite.c \
 	../../../src/vm/gdb.c \
+	../../../src/vm/guest/guest.c \
+	../../../src/vm/guest/linux.c \
 	../../../src/vm/load.c \
 	../../../src/vm/result.c \
 	../../../src/vm/run.c \

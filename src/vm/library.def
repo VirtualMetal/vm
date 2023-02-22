@@ -1,6 +1,7 @@
 EXPORTS
     vm_result_error_string
     vm_run
+    vm_run_ex
     vm_create
     vm_delete
     vm_mmap

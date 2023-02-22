@@ -134,6 +134,8 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
+static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static void vm_log_mmap(vm_t *instance);
 static void vm_log_vcpu_cancel(vm_t *instance,
     unsigned vcpu_index, vm_result_t result);
@@ -187,6 +189,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     }
     if (0 == vcpu_count)
         vcpu_count = 1;
+    else if (VM_CONFIG_VCPU_COUNT_MAX < vcpu_count)
+        vcpu_count = VM_CONFIG_VCPU_COUNT_MAX;
 
     instance = malloc(sizeof *instance + vcpu_count * sizeof instance->debug_thread_data[0]);
     if (0 == instance)
@@ -197,6 +201,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    if (0 == instance->config.gmio)
+        instance->config.gmio = vm_default_gmio;
     instance->config.vcpu_count = vcpu_count;
     instance->hv_fd = -1;
     instance->vm_fd = -1;
@@ -1289,11 +1295,20 @@ static void *vm_thread(void *instance0)
         switch (vcpu_run->exit_reason)
         {
         case KVM_EXIT_IO:
-            result = vm_result(VM_ERROR_VCPU, 0);
+            for (__u32 index = 0; vcpu_run->io.count > index; index++)
+            {
+                result = instance->config.gmio(instance->config.user_context, vcpu_index,
+                    VM_GMIO_PMIO | vcpu_run->io.direction, vcpu_run->io.port, vcpu_run->io.size,
+                    (uint8_t *)vcpu_run + vcpu_run->io.data_offset);
+                if (!vm_result_check(result))
+                    break;
+            }
             break;
 
         case KVM_EXIT_MMIO:
-            result = vm_result(VM_ERROR_VCPU, 0);
+            result = instance->config.gmio(instance->config.user_context, vcpu_index,
+                VM_GMIO_MMIO | vcpu_run->mmio.is_write, vcpu_run->mmio.phys_addr, vcpu_run->mmio.len,
+                &vcpu_run->mmio.data);
             break;
 
         case KVM_EXIT_DEBUG:
@@ -1531,8 +1546,8 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
 #if defined(__x86_64__)
     vm_result_t result;
     void *page = 0;
-    vm_count_t length;
-    vm_count_t cpu_data_address;
+    vm_count_t vcpu_table, stride, length, cpu_data_address;
+    vm_count_t vcpu_entry, vcpu_args[6];
     struct arch_x64_seg_desc seg_desc;
     struct arch_x64_sseg_desc sseg_desc;
     struct kvm_regs regs;
@@ -1549,7 +1564,9 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
         goto exit;
     }
 
-    cpu_data_address = instance->config.vcpu_table + vcpu_index * sizeof(struct arch_x64_cpu_data);
+    vcpu_table = instance->config.vcpu_table & ~0xff;
+    stride = instance->config.vcpu_table & 0xff;
+    cpu_data_address = vcpu_table + vcpu_index * stride * sizeof(struct arch_x64_cpu_data);
     arch_x64_cpu_data_init(page, cpu_data_address);
     length = sizeof(struct arch_x64_cpu_data);
     vm_mwrite(instance, page, cpu_data_address, &length);
@@ -1559,14 +1576,35 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
         goto exit;
     }
 
+    if (0 == vcpu_index || 0 == instance->config.vcpu_mailbox)
+    {
+        vcpu_entry = instance->config.vcpu_entry;
+        vcpu_args[0] = instance->config.vcpu_args[0];
+        vcpu_args[1] = instance->config.vcpu_args[1];
+        vcpu_args[2] = instance->config.vcpu_args[2];
+        vcpu_args[3] = instance->config.vcpu_args[3];
+        vcpu_args[4] = instance->config.vcpu_args[4];
+        vcpu_args[5] = instance->config.vcpu_args[5];
+    }
+    else
+    {
+        vcpu_entry = (vm_count_t)&((struct arch_x64_cpu_data *)cpu_data_address)->wakeup.code;
+        vcpu_args[0] = instance->config.vcpu_mailbox;
+        vcpu_args[1] = ((vm_count_t)vcpu_index << 32) | 1;
+        vcpu_args[2] = 0;
+        vcpu_args[3] = 0;
+        vcpu_args[4] = 0;
+        vcpu_args[5] = 0;
+    }
+
     memset(&regs, 0, sizeof regs);
-    regs.rdi = instance->config.vcpu_args[0];
-    regs.rsi = instance->config.vcpu_args[1];
-    regs.rdx = instance->config.vcpu_args[2];
-    regs.rcx = instance->config.vcpu_args[3];
-    regs.r8 = instance->config.vcpu_args[4];
-    regs.r9 = instance->config.vcpu_args[5];
-    regs.rip = instance->config.vcpu_entry;
+    regs.rdi = vcpu_args[0];
+    regs.rsi = vcpu_args[1];
+    regs.rdx = vcpu_args[2];
+    regs.rcx = vcpu_args[3];
+    regs.r8 = vcpu_args[4];
+    regs.r9 = vcpu_args[5];
+    regs.rip = vcpu_entry;
     regs.rflags = 2;
 
     memset(&sregs, 0, sizeof sregs);
@@ -1960,6 +1998,12 @@ static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
 
 exit:
     return result;
+}
+
+static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
+{
+    return vm_result(VM_ERROR_VCPU, 0);
 }
 
 static void vm_log_mmap(vm_t *instance)
