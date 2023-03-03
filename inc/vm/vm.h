@@ -75,12 +75,13 @@ struct vm_config
     /* reconfigurable */
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
     vm_count_t vcpu_args[6];            /* virtual cpu entry args */
-    vm_count_t vcpu_table;              /* virtual cpu data table address / stride */
+    vm_count_t vcpu_table;              /* virtual cpu table address / stride (GDT+stack on x64) */
+    vm_count_t vcpu_alt_table;          /* virtual cpu alternate table address (IDT on x64) */
     vm_count_t vcpu_mailbox;            /* virtual cpu wakeup mailbox (ACPI 6.4,5.2.12.19) */
     vm_count_t page_table;              /* page table address */
     vm_count_t exec_textseg;            /* executable file text segment address */
     vm_count_t exec_dataseg;            /* executable file data segment address */
-    vm_count_t reserved2[20];
+    vm_count_t reserved2[19];
 };
 VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 

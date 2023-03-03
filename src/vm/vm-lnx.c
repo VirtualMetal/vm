@@ -18,6 +18,11 @@
 #define SIG_VCPU_CANCEL                 (SIGRTMAX - 1)
 #define SIG_DBSRV_CANCEL                (SIGRTMAX - 2)
 
+#if defined(__x86_64__)
+#define VM_DEBUG_BP_INSTR               0xcc    /* INT3 instruction */
+#define VM_DEBUG_BP_LENGTH              1
+#endif
+
 struct vm
 {
     vm_config_t config;                 /* must be first */
@@ -122,6 +127,8 @@ struct vm_debug_socket
 static vm_result_t vm_debug_internal(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
+static int vm_debug_hasbp(vm_t *instance,
+    vm_count_t vcpu_index, vm_count_t address);
 static void *vm_thread(void *instance0);
 static void vm_thread_signal(int signum);
 static vm_result_t vm_thread_debug_event(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
@@ -129,7 +136,7 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, unsigned vcpu_index, int
     struct kvm_run *vcpu_run, int *phas_debug_event);
 static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
 static vm_result_t vm_vcpu_init_cpuid(vm_t *instance, unsigned vcpu_index, int vcpu_fd);
-static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step);
+static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step, uint32_t inject);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
@@ -1056,10 +1063,8 @@ static vm_result_t vm_debug_internal(vm_t *instance,
 
         {
             vm_count_t bp_ident, bp_paddr, index;
-#if defined(__x86_64__)
-            uint32_t bp_value = 0, bp_instr = 0xcc/* INT3 instruction */;
-            vm_count_t bp_length, bp_expected = 1;
-#endif
+            uint32_t bp_value = 0, bp_instr = VM_DEBUG_BP_INSTR;
+            vm_count_t bp_length, bp_expected = VM_DEBUG_BP_LENGTH;
 
             bp_ident = bp_paddr = address;
 
@@ -1168,6 +1173,27 @@ static vm_result_t vm_debug_internal(vm_t *instance,
 
 exit:
     return result;
+}
+
+static int vm_debug_hasbp(vm_t *instance,
+    vm_count_t vcpu_index, vm_count_t address)
+{
+    vm_result_t result;
+    vm_count_t bp_paddr, index;
+    struct vm_debug *debug;
+
+    debug = instance->debug;
+
+    result = vm_vcpu_translate(instance,
+        instance->debug_thread_data[vcpu_index].vcpu_fd, address, &bp_paddr);
+    if (!vm_result_check(result))
+        return 0;
+
+    for (index = 0; debug->bp_count > index; index++)
+        if (debug->bp_paddr[index] == bp_paddr)
+            return 1;
+
+    return 0;
 }
 
 static __thread struct kvm_run *vm_thread_vcpu_run;
@@ -1475,7 +1501,7 @@ static vm_result_t vm_thread_debug_event(vm_t *instance, unsigned vcpu_index, in
         if (other_is_stepping)
             continue;
 
-        return vm_vcpu_debug(instance, vcpu_fd, is_debugged, is_stepping);
+        return vm_vcpu_debug(instance, vcpu_fd, is_debugged, is_stepping, 0);
     }
 
 #undef WAITCOND
@@ -1487,6 +1513,7 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, unsigned vcpu_index, int
     vm_result_t result;
     struct vm_debug *debug;
     int has_debug_event, range_step;
+    uint32_t inject;
 
     *phas_debug_event = 0;
 
@@ -1504,32 +1531,52 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, unsigned vcpu_index, int
     pthread_mutex_lock(&instance->thread_lock);
 
     has_debug_event = range_step = 0;
-    if (0 != (debug = instance->debug) && debug->is_debugged)
+    inject = 0;
+    if (is_db_ex)
     {
-        debug->stop_on_start = 1;
-        if (is_db_ex && debug->is_stepping)
+        if (0 != (debug = instance->debug) && debug->is_debugged &&
+            debug->is_stepping)
         {
             range_step = debug->step_range.begin <= pc && pc < debug->step_range.end;
             has_debug_event = !range_step;
+            debug->stop_on_start = 1;
         }
         else
+            inject = KVM_GUESTDBG_INJECT_DB;
+    }
+    else if (is_bp_ex)
+    {
+        if (0 != (debug = instance->debug) && debug->is_debugged &&
+            vm_debug_hasbp(instance, vcpu_index, pc))
         {
             for (unsigned index = 0; instance->config.vcpu_count > index; index++)
                 if (index != vcpu_index && instance->debug_thread_data[index].has_thread)
                     pthread_kill(instance->debug_thread_data[index].thread, SIG_VCPU_CANCEL);
             has_debug_event = 1;
+            debug->stop_on_start = 1;
         }
+        else
+            inject = KVM_GUESTDBG_INJECT_BP;
     }
 
     pthread_mutex_unlock(&instance->thread_lock);
 
-    if (range_step)
+    if (inject)
+    {
+        /*
+         * If we are reinjecting do not report a debug event (has_debug_event == FALSE).
+         */
+        result = vm_vcpu_debug(instance, vcpu_fd, 1, 0, inject);
+        if (!vm_result_check(result))
+            goto exit;
+    }
+    else if (range_step)
     {
         /*
          * If we are range stepping do not report a debug event (has_debug_event == FALSE).
          * Instead prepare the virtual CPU for another single step through the step range.
          */
-        result = vm_vcpu_debug(instance, vcpu_fd, 1, 1);
+        result = vm_vcpu_debug(instance, vcpu_fd, 1, 1, 0);
         if (!vm_result_check(result))
             goto exit;
     }
@@ -1675,6 +1722,9 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
     sregs.gdt = (struct kvm_dtable){
         .base = cpu_data_address + (vm_count_t)&((struct arch_x64_cpu_data *)0)->gdt,
         .limit = sizeof(struct arch_x64_gdt) };
+    sregs.idt = (struct kvm_dtable){
+        .base = instance->config.vcpu_alt_table,
+        .limit = 0 != instance->config.vcpu_alt_table ? sizeof(struct arch_x64_idt) : 0 };
     sregs.cr0 = 0x80000011;             /* PG=1,MP=1,PE=1 */
     sregs.cr3 = instance->config.page_table;
     sregs.cr4 = 0x00000020;             /* PAE=1 */
@@ -1768,7 +1818,7 @@ exit:
 #endif
 }
 
-static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step)
+static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int step, uint32_t inject)
 {
     vm_result_t result;
     struct kvm_guest_debug debug;
@@ -1778,7 +1828,8 @@ static vm_result_t vm_vcpu_debug(vm_t *instance, int vcpu_fd, int enable, int st
         debug.control =
             KVM_GUESTDBG_ENABLE |
             KVM_GUESTDBG_USE_SW_BP |
-            (step ? KVM_GUESTDBG_SINGLESTEP : 0);
+            (step ? KVM_GUESTDBG_SINGLESTEP : 0) |
+            inject;
 
     if (-1 == ioctl(vcpu_fd, KVM_SET_GUEST_DEBUG, &debug))
     {

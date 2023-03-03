@@ -235,6 +235,36 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
             vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_table));
         }
         else
+        if (CMD("vcpu_alt_table") || CMD("idt"))
+        {
+            config.vcpu_alt_table = strtoullint(p, &p, +1);
+            CHK('\0' == *p);
+            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_alt_table));
+        }
+#if (defined(_MSC_VER) && defined(_M_X64)) || (defined(__GNUC__) && defined(__x86_64__))
+        else
+        if (CMD("idt_intg") || CMD("idt_sysg"))
+        {
+            struct arch_x64_gate_desc gate;
+            count = strtoullint(p, &p, +1);
+            CHK(',' == *p);
+            CHK(0 <= count && count <= 255);
+            guest_address = strtoullint(p + 1, &p, +1);
+            CHK('\0' == *p);
+            if ('i' == (*pp)[4])
+                arch_x64_intg_init(&gate, guest_address, 1);
+            else
+                arch_x64_sysg_init(&gate, guest_address, 1);
+            page_address = config.vcpu_alt_table;
+            length = sizeof gate;
+            vm_mwrite(instance,
+                &gate,
+                page_address + count * sizeof gate,
+                &length);
+            CHK(sizeof gate == length);
+        }
+#endif
+        else
         if (CMD("vcpu_mailbox"))
         {
             config.vcpu_mailbox = strtoullint(p, &p, +1);

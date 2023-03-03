@@ -48,7 +48,7 @@ struct arch_x64_seg_desc
 };
 ARCH_STATIC_ASSERT(8 == sizeof(struct arch_x64_seg_desc));
 
-/* system segment descriptor - [INT 7.2.3], [AMD 4.8.3] */
+/* system segment descriptor - [INT 8.2.3], [AMD 4.8.3] */
 struct arch_x64_sseg_desc
 {
     union
@@ -82,7 +82,7 @@ struct arch_x64_sseg_desc
 };
 ARCH_STATIC_ASSERT(16 == sizeof(struct arch_x64_sseg_desc));
 
-/* gate descriptor - [INT 7.2.3], [AMD 4.8.4] */
+/* gate descriptor - [INT 6.14.1], [AMD 4.8.4] */
 struct arch_x64_gate_desc
 {
     union
@@ -126,15 +126,14 @@ struct arch_x64_gdt
 };
 ARCH_STATIC_ASSERT(64 == sizeof(struct arch_x64_gdt));
 
-/* task state segment - [INT 7.7], [AMD 12.2.5] */
+/* task state segment - [INT 8.7], [AMD 12.2.5] */
 struct arch_x64_tss
 {
     arch_u32_t reserved0[1];            /* cacheline */
     arch_u32_t rsp[3][2];
+    arch_u32_t ist[8][2];               /* ist[0] is reserved/unused */
     arch_u32_t reserved1[2];
-    arch_u32_t ist[7][2];
-    arch_u32_t reserved2[2];
-    arch_u16_t reserved3[1];
+    arch_u16_t reserved2[1];
     arch_u16_t iopb;
 };
 ARCH_STATIC_ASSERT(104 == sizeof(struct arch_x64_tss));
@@ -162,6 +161,40 @@ struct arch_x64_cpu_data
     struct arch_x64_wakeup wakeup;
 };
 ARCH_STATIC_ASSERT(4096 == sizeof(struct arch_x64_cpu_data));
+
+static inline
+void arch_x64_intg_init(struct arch_x64_gate_desc *gate, arch_u64_t address, arch_u8_t ist)
+{
+    arch_u16_t selector = (arch_u16_t)(arch_u64_t)&((struct arch_x64_gdt *)0)->km_cs;
+
+    *gate = (struct arch_x64_gate_desc){
+        .selector = selector,
+        .address0 = (arch_u16_t)((address) & 0xffff),
+        .address1 = (arch_u16_t)((address >> 16) & 0xffff),
+        .address2 = (arch_u32_t)((address >> 32) & 0xffffffff),
+        .ist = (arch_u8_t)(ist & 7),
+        .type = 14,                     /* TYPE=14 (64-bit Interrupt Gate) */
+        .dpl = 0,                       /* DPL=0 (kernel-mode) */
+        .p = 1,                         /* P=1 (present) */
+    };
+}
+
+static inline
+void arch_x64_sysg_init(struct arch_x64_gate_desc *gate, arch_u64_t address, arch_u8_t ist)
+{
+    arch_u16_t selector = (arch_u16_t)(arch_u64_t)&((struct arch_x64_gdt *)0)->km_cs;
+
+    *gate = (struct arch_x64_gate_desc){
+        .selector = selector,
+        .address0 = (arch_u16_t)((address) & 0xffff),
+        .address1 = (arch_u16_t)((address >> 16) & 0xffff),
+        .address2 = (arch_u32_t)((address >> 32) & 0xffffffff),
+        .ist = (arch_u8_t)(ist & 7),
+        .type = 14,                     /* TYPE=14 (64-bit Interrupt Gate) */
+        .dpl = 3,                       /* DPL=3 (user-mode) */
+        .p = 1,                         /* P=1 (present) */
+    };
+}
 
 static inline
 void arch_x64_gdt_init(struct arch_x64_gdt *gdt)
@@ -238,7 +271,7 @@ void arch_x64_wakeup_init(struct arch_x64_wakeup *wakeup)
                 "\xF3\x90"              /* spin:    pause */
                 "\x48\x39\x37"          /*          cmp [rdi],rsi */
                 "\x75\xF9"              /*          jne spin */
-                "\x48\x31\xF6"          /*          xor rsi,rsi */
+                "\x31\xF6"              /*          xor esi,esi */
                 "\x48\x8B\x47\x08"      /*          mov rax,[rdi+8] */
                 "\x48\x87\x37"          /*          xchg [rdi],rsi */
                 "\xFF\xE0"              /*          jmp rax */
@@ -260,8 +293,8 @@ void arch_x64_cpu_data_init(struct arch_x64_cpu_data *cpu_data, arch_u64_t addre
     cpu_data->gdt.tss.address2 = (arch_u32_t)((address + offset) >> 32);
 
     offset = (arch_u64_t)&((struct arch_x64_cpu_data *)0)->km_stack + sizeof cpu_data->km_stack;
-    cpu_data->tss.rsp[0][0] = (arch_u32_t)(address + offset);
-    cpu_data->tss.rsp[0][1] = (arch_u32_t)((address + offset) >> 32);
+    cpu_data->tss.rsp[0][0] = cpu_data->tss.ist[1][0] = (arch_u32_t)(address + offset);
+    cpu_data->tss.rsp[0][1] = cpu_data->tss.ist[1][1] = (arch_u32_t)((address + offset) >> 32);
 }
 
 #endif

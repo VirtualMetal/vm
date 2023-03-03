@@ -15,6 +15,11 @@
 #include <winhvplatform.h>
 #include <winhvemulation.h>
 
+#if defined(_M_X64)
+#define VM_DEBUG_BP_INSTR               0xcc    /* INT3 instruction */
+#define VM_DEBUG_BP_LENGTH              1
+#endif
+
 struct vm
 {
     vm_config_t config;                 /* must be first */
@@ -105,6 +110,8 @@ struct vm_debug_socket
 static vm_result_t vm_debug_internal(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
+static int vm_debug_hasbp(vm_t *instance,
+    vm_count_t vcpu_index, vm_count_t address);
 static DWORD WINAPI vm_thread(PVOID instance0);
 static vm_result_t vm_thread_debug_event(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
@@ -113,6 +120,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index);
 static vm_result_t vm_vcpu_cpuid_exit(vm_t *instance, UINT32 vcpu_index,
     WHV_RUN_VP_EXIT_CONTEXT *exit_context);
 static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable, BOOL step);
+static vm_result_t vm_vcpu_debug_inject(vm_t *instance, UINT32 vcpu_index, UINT8 exception);
 static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
@@ -1139,10 +1147,8 @@ static vm_result_t vm_debug_internal(vm_t *instance,
 
         {
             vm_count_t bp_ident, bp_paddr, index;
-#if defined(_M_X64)
-            UINT32 bp_value = 0, bp_instr = 0xcc/* INT3 instruction */;
-            vm_count_t bp_length, bp_expected = 1;
-#endif
+            UINT32 bp_value = 0, bp_instr = VM_DEBUG_BP_INSTR;
+            vm_count_t bp_length, bp_expected = VM_DEBUG_BP_LENGTH;
 
             bp_ident = bp_paddr = address;
 
@@ -1250,6 +1256,26 @@ static vm_result_t vm_debug_internal(vm_t *instance,
 
 exit:
     return result;
+}
+
+static int vm_debug_hasbp(vm_t *instance,
+    vm_count_t vcpu_index, vm_count_t address)
+{
+    vm_result_t result;
+    vm_count_t bp_paddr, index;
+    struct vm_debug *debug;
+
+    debug = instance->debug;
+
+    result = vm_vcpu_translate(instance, (UINT32)vcpu_index, address, &bp_paddr);
+    if (!vm_result_check(result))
+        return 0;
+
+    for (index = 0; debug->bp_count > index; index++)
+        if (debug->bp_paddr[index] == bp_paddr)
+            return 1;
+
+    return 0;
 }
 
 static DWORD WINAPI vm_thread(PVOID instance0)
@@ -1545,6 +1571,7 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
     vm_result_t result;
     struct vm_debug *debug;
     BOOL has_debug_event, range_step;
+    UINT8 inject;
 
     *phas_debug_event = FALSE;
 
@@ -1562,26 +1589,46 @@ static vm_result_t vm_thread_debug_exit(vm_t *instance, UINT32 vcpu_index,
     AcquireSRWLockExclusive(&instance->thread_lock);
 
     has_debug_event = range_step = FALSE;
-    if (0 != (debug = instance->debug) && debug->is_debugged)
+    inject = 0;
+    if (is_db_ex)
     {
-        debug->stop_on_start = 1;
-        if (is_db_ex && debug->is_stepping)
+        if (0 != (debug = instance->debug) && debug->is_debugged &&
+            debug->is_stepping)
         {
             range_step = debug->step_range.begin <= pc && pc < debug->step_range.end;
             has_debug_event = !range_step;
+            debug->stop_on_start = 1;
         }
         else
+            inject = WHvX64ExceptionTypeDebugTrapOrFault;
+    }
+    else if (is_bp_ex)
+    {
+        if (0 != (debug = instance->debug) && debug->is_debugged &&
+            vm_debug_hasbp(instance, vcpu_index, pc))
         {
             for (UINT32 index = 0; instance->config.vcpu_count > index; index++)
                 if (index != vcpu_index)
                     WHvCancelRunVirtualProcessor(instance->partition, index, 0);
             has_debug_event = TRUE;
+            debug->stop_on_start = 1;
         }
+        else
+            inject = WHvX64ExceptionTypeBreakpointTrap;
     }
 
     ReleaseSRWLockExclusive(&instance->thread_lock);
 
-    if (range_step)
+    if (inject)
+    {
+        /*
+         * If we are reinjecting do not report a debug event (has_debug_event == FALSE).
+         */
+        result = vm_vcpu_debug_inject(instance, vcpu_index, inject);
+        if (!vm_result_check(result))
+            goto exit;
+    }
+    else if (range_step)
     {
         /*
          * If we are range stepping do not report a debug event (has_debug_event == FALSE).
@@ -1739,6 +1786,9 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
     REGSET(Gdtr) = REGVAL(
         .Table.Base = cpu_data_address + (vm_count_t)&((struct arch_x64_cpu_data *)0)->gdt,
         .Table.Limit = sizeof(struct arch_x64_gdt));
+    REGSET(Idtr) = REGVAL(
+        .Table.Base = instance->config.vcpu_alt_table,
+        .Table.Limit = 0 != instance->config.vcpu_alt_table ? sizeof(struct arch_x64_idt) : 0);
     REGSET(Cr0) = REGVAL(.Reg64 = 0x80000011);    /* PG=1,MP=1,PE=1 */
     REGSET(Cr3) = REGVAL(.Reg64 = instance->config.page_table);
     REGSET(Cr4) = REGVAL(.Reg64 = 0x00000020);    /* PAE=1 */
@@ -1871,6 +1921,71 @@ static vm_result_t vm_vcpu_debug(vm_t *instance, UINT32 vcpu_index, BOOL enable,
 
     regc = 0;
     REGSET(Rflags) = REGVAL(.Reg64 = rflags);
+
+    hresult = WHvSetVirtualProcessorRegisters(instance->partition,
+        vcpu_index, regn, regc, regv);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+#endif
+}
+
+static vm_result_t vm_vcpu_debug_inject(vm_t *instance, UINT32 vcpu_index, UINT8 exception)
+{
+#if defined(_M_X64)
+    vm_result_t result;
+    WHV_REGISTER_NAME regn[1];
+    WHV_REGISTER_VALUE regv[1];
+    UINT32 regc;
+    HRESULT hresult;
+
+    switch (exception)
+    {
+    case WHvX64ExceptionTypeDebugTrapOrFault:
+        regc = 1;
+        regn[0] = WHvRegisterPendingInterruption;
+        regv[0] = REGVAL
+        (
+            .PendingInterruption.InterruptionPending = 1,
+            .PendingInterruption.InterruptionType = WHvX64PendingException,
+            .PendingInterruption.InterruptionVector = WHvX64ExceptionTypeDebugTrapOrFault,
+        );
+        break;
+    case WHvX64ExceptionTypeBreakpointTrap:
+        /*
+         * We seem to have a bit of a confusion regarding #BP injection:
+         *
+         * - Intel manual (vol 3 - 25.8.3) says we should use type 6: Software exception.
+         *     - Intel manual (vol 3 - 27.6.1.1) also suggests that type 4: Software Interrupt
+         *       should work. Software interrupts and software exceptions appear to work in a
+         *       similar fashion, except in virtual-8086 mode which we do not use.
+         * - AMD manual (vol 2 - 15.20) says we should use type 3: Exception (fault or trap).
+         * - Hyper-V seems to only like Type==4 && Length == 1, at least on this Intel machine.
+         *   (Is it possible that we need Type==3 && Length == 0 on an AMD machine?)
+         *
+         * Stick with what WORKS ON MY MACHINE.
+         */
+        regc = 1;
+        regn[0] = WHvRegisterPendingInterruption;
+        regv[0] = REGVAL
+        (
+            .PendingInterruption.InterruptionPending = 1,
+            .PendingInterruption.InterruptionType = 4,  /* Software interrupt */
+            .PendingInterruption.InterruptionVector = WHvX64ExceptionTypeBreakpointTrap,
+            .PendingInterruption.InstructionLength = 1,
+        );
+        break;
+    default:
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
 
     hresult = WHvSetVirtualProcessorRegisters(instance->partition,
         vcpu_index, regn, regc, regv);

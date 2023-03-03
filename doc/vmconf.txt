@@ -71,6 +71,16 @@
 # Virtual CPU table.
 #vcpu_table=<address>[,<stride>]
 
+# Virtual CPU alternate table.
+#vcpu_alt_table=<address>
+#idt=<address>
+
+# [x64 only] IDT interrupt gate (DPL=0).
+#idt_intg=<number>,<address>
+
+# [x64 only] IDT system gate (DPL=3).
+#idt_sysg=<number>,<address>
+
 # Virtual CPU wakeup mailbox.
 #vcpu_mailbox=<address>
 
