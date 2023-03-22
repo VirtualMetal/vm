@@ -141,7 +141,7 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
-static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static void vm_log_mmap(vm_t *instance);
 static void vm_log_vcpu_cancel(vm_t *instance,
@@ -208,8 +208,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
-    if (0 == instance->config.gmio)
-        instance->config.gmio = vm_default_gmio;
+    if (0 == instance->config.xmio)
+        instance->config.xmio = vm_default_xmio;
     instance->config.vcpu_count = vcpu_count;
     instance->hv_fd = -1;
     instance->vm_fd = -1;
@@ -1323,8 +1323,8 @@ static void *vm_thread(void *instance0)
         case KVM_EXIT_IO:
             for (__u32 index = 0; vcpu_run->io.count > index; index++)
             {
-                result = instance->config.gmio(instance->config.user_context, vcpu_index,
-                    VM_GMIO_PMIO | vcpu_run->io.direction, vcpu_run->io.port, vcpu_run->io.size,
+                result = instance->config.xmio(instance->config.user_context, vcpu_index,
+                    VM_XMIO_PMIO | vcpu_run->io.direction, vcpu_run->io.port, vcpu_run->io.size,
                     (uint8_t *)vcpu_run + vcpu_run->io.data_offset);
                 if (!vm_result_check(result))
                     break;
@@ -1332,8 +1332,8 @@ static void *vm_thread(void *instance0)
             break;
 
         case KVM_EXIT_MMIO:
-            result = instance->config.gmio(instance->config.user_context, vcpu_index,
-                VM_GMIO_MMIO | vcpu_run->mmio.is_write, vcpu_run->mmio.phys_addr, vcpu_run->mmio.len,
+            result = instance->config.xmio(instance->config.user_context, vcpu_index,
+                VM_XMIO_MMIO | vcpu_run->mmio.is_write, vcpu_run->mmio.phys_addr, vcpu_run->mmio.len,
                 &vcpu_run->mmio.data);
             break;
 
@@ -2051,7 +2051,7 @@ exit:
     return result;
 }
 
-static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     return vm_result(VM_ERROR_VCPU, 0);

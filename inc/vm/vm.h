@@ -58,7 +58,7 @@ typedef unsigned long long vm_count_t;
 struct vm_config
 {
     /* interface */
-    vm_result_t (*gmio)(void *user_context, vm_count_t vcpu_index,
+    vm_result_t (*xmio)(void *user_context, vm_count_t vcpu_index,
         vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
     void (*logf)(const char *format, ...);
     vm_count_t reserved0[14];
@@ -97,10 +97,10 @@ VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 
 #define VM_CONFIG_VCPU_COUNT_MAX        64
 
-#define VM_GMIO_RD                      0
-#define VM_GMIO_WR                      1
-#define VM_GMIO_MMIO                    0
-#define VM_GMIO_PMIO                    2
+#define VM_XMIO_RD                      0
+#define VM_XMIO_WR                      1
+#define VM_XMIO_MMIO                    0
+#define VM_XMIO_PMIO                    2
 
 struct vm_runcmd
 {

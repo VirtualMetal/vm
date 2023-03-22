@@ -125,7 +125,7 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
-static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static HRESULT CALLBACK vm_emulator_pmio(
     PVOID context,
@@ -289,8 +289,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
-    if (0 == instance->config.gmio)
-        instance->config.gmio = vm_default_gmio;
+    if (0 == instance->config.xmio)
+        instance->config.xmio = vm_default_xmio;
     instance->config.vcpu_count = vcpu_count;
     InitializeSRWLock(&instance->mmap_lock);
     list_init(&instance->mmap_list);
@@ -2210,7 +2210,7 @@ exit:
     return result;
 }
 
-static vm_result_t vm_default_gmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     return vm_result(VM_ERROR_VCPU, 0);
@@ -2222,8 +2222,8 @@ static HRESULT CALLBACK vm_emulator_pmio(
 {
     struct vm_emulator_context *context = context0;
     vm_t *instance = context->instance;
-    context->result = instance->config.gmio(instance->config.user_context, context->vcpu_index,
-        VM_GMIO_PMIO | io->Direction, io->Port, io->AccessSize, &io->Data);
+    context->result = instance->config.xmio(instance->config.user_context, context->vcpu_index,
+        VM_XMIO_PMIO | io->Direction, io->Port, io->AccessSize, &io->Data);
     return vm_result_check(context->result) ? S_OK : E_FAIL;
 }
 
@@ -2233,8 +2233,8 @@ static HRESULT CALLBACK vm_emulator_mmio(
 {
     struct vm_emulator_context *context = context0;
     vm_t *instance = context->instance;
-    context->result = instance->config.gmio(instance->config.user_context, context->vcpu_index,
-        VM_GMIO_MMIO | mmio->Direction, mmio->GpaAddress, mmio->AccessSize, &mmio->Data);
+    context->result = instance->config.xmio(instance->config.user_context, context->vcpu_index,
+        VM_XMIO_MMIO | mmio->Direction, mmio->GpaAddress, mmio->AccessSize, &mmio->Data);
     return vm_result_check(context->result) ? S_OK : E_FAIL;
 }
 
