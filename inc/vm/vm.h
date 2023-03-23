@@ -99,8 +99,10 @@ VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 
 #define VM_XMIO_RD                      0
 #define VM_XMIO_WR                      1
+#define VM_XMIO_DIR(F)                  ((F) & 1)
 #define VM_XMIO_MMIO                    0
 #define VM_XMIO_PMIO                    2
+#define VM_XMIO_KIND(F)                 ((F) & 2)
 
 struct vm_runcmd
 {

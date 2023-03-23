@@ -261,6 +261,8 @@ static vm_result_t vm_guest_linux_runcmd_m(vm_t *instance,
 static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance);
 static vm_result_t vm_guest_linux_setup_page_table(vm_t *instance);
 static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size);
+static vm_result_t vm_guest_linux_xmio(void *user_context, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 
 /* adapted from vm_run: check macro */
 #define CHK(C)  do \
@@ -284,6 +286,7 @@ vm_result_t vm_guest_linux_runcmd(void *context,
 static vm_result_t vm_guest_linux_runcmd_c(vm_config_t *config,
     vm_runcmd_t *runcmd, char phase, const char *value)
 {
+    config->xmio = vm_guest_linux_xmio;
     config->passthrough = 1;
     return VM_RESULT_SUCCESS;
 }
@@ -561,3 +564,12 @@ exit:
 }
 
 #undef CHK
+
+static vm_result_t vm_guest_linux_xmio(void *user_context, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
+{
+    if (VM_XMIO_RD == VM_XMIO_DIR(flags))
+        memset(buffer, 0, length);
+
+    return VM_RESULT_SUCCESS;
+}
