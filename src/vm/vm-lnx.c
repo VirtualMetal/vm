@@ -167,6 +167,7 @@ static vm_result_t vm_debug_server_strm(void *socket0, int dir, void *buffer, vm
 #define SREGNAM(r)                      regn[regc] = offsetof(struct kvm_sregs, r), regc++
 #define REGBIT(b)                       regb[regc - 1] = (b), regl += regb[regc - 1] >> 3
 
+VM_API
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 {
     struct sigaction action = { 0 };
@@ -328,6 +329,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_delete(vm_t *instance)
 {
     if (0 != instance->debug_server)
@@ -373,6 +375,7 @@ vm_result_t vm_delete(vm_t *instance)
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_mmap(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
     void *host_address, int file, vm_count_t file_offset, vm_count_t file_length,
@@ -529,6 +532,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
 {
     struct kvm_userspace_memory_region region;
@@ -559,6 +563,7 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_mmap_read(vm_mmap_t *map,
     vm_count_t offset, void *buffer, vm_count_t *plength)
 {
@@ -580,6 +585,7 @@ exit:
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_mmap_write(vm_mmap_t *map,
     void *buffer, vm_count_t offset, vm_count_t *plength)
 {
@@ -601,6 +607,7 @@ exit:
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_mread(vm_t *instance,
     vm_count_t guest_address, void *buffer, vm_count_t *plength)
 {
@@ -626,6 +633,7 @@ vm_result_t vm_mread(vm_t *instance,
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_mwrite(vm_t *instance,
     void *buffer, vm_count_t guest_address, vm_count_t *plength)
 {
@@ -651,6 +659,7 @@ vm_result_t vm_mwrite(vm_t *instance,
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask)
 {
     vm_result_t result;
@@ -680,6 +689,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_start(vm_t *instance)
 {
     vm_result_t result;
@@ -722,6 +732,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_wait(vm_t *instance)
 {
     vm_result_t result;
@@ -758,6 +769,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_terminate(vm_t *instance)
 {
     pthread_mutex_lock(&instance->thread_lock);
@@ -778,6 +790,7 @@ vm_result_t vm_terminate(vm_t *instance)
     return VM_RESULT_SUCCESS;
 }
 
+VM_API
 vm_result_t vm_debug(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength)
@@ -2193,6 +2206,7 @@ static void vm_log_vcpu_exit(vm_t *instance,
     }
 }
 
+VM_API
 vm_result_t vm_debug_server_start(vm_t *instance,
     const char *hostname, const char *servname)
 {
@@ -2279,6 +2293,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_debug_server_stop(vm_t *instance)
 {
     vm_result_t result;

@@ -21,17 +21,11 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(ApplicationType)|$(Configuration)'=='Linux|Debug'">
     <PlatformToolset>WSL_1_0</PlatformToolset>
-    <RemoteCCompileToolExe>$([MSBuild]::EnsureTrailingSlash($([MSBuild]::MakeRelative($(MSBuildProjectDirectory), $(MsbuildThisFileDirectory)))).Replace('\', '/'))cctool.sh</RemoteCCompileToolExe>
-    <RemoteCppCompileToolExe>$(RemoteCCompileToolExe)</RemoteCppCompileToolExe>
-    <RemoteLdToolExe>$(RemoteCCompileToolExe)</RemoteLdToolExe>
     <UseDebugLibraries>true</UseDebugLibraries>
     <AdditionalDebuggerCommands>handle SIG63 nostop noprint pass; handle SIG62 nostop noprint pass</AdditionalDebuggerCommands>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ApplicationType)|$(Configuration)'=='Linux|Release'">
     <PlatformToolset>WSL_1_0</PlatformToolset>
-    <RemoteCCompileToolExe>$([MSBuild]::EnsureTrailingSlash($([MSBuild]::MakeRelative($(MSBuildProjectDirectory), $(MsbuildThisFileDirectory)))).Replace('\', '/'))cctool.sh</RemoteCCompileToolExe>
-    <RemoteCppCompileToolExe>$(RemoteCCompileToolExe)</RemoteCppCompileToolExe>
-    <RemoteLdToolExe>$(RemoteCCompileToolExe)</RemoteLdToolExe>
     <UseDebugLibraries>false</UseDebugLibraries>
     <AdditionalDebuggerCommands>handle SIG63 nostop noprint pass; handle SIG62 nostop noprint pass</AdditionalDebuggerCommands>
   </PropertyGroup>

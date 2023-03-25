@@ -12,6 +12,7 @@
  */
 
 #include <vm/internal.h>
+#include <vm/guest/guest.h>
 
 /*
  * Memory Layout for Linux guest

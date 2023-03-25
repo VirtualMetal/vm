@@ -44,7 +44,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -55,32 +55,25 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\inc\vm\vm.h" />
-    <ClInclude Include="..\..\..\src\arch\arch.h" />
-    <ClInclude Include="..\..\..\src\arch\x64.h" />
     <ClInclude Include="..\..\..\src\tlib\testsuite.h" />
-    <ClInclude Include="..\..\..\src\vm\guest\guest.h" />
-    <ClInclude Include="..\..\..\src\vm\internal.h" />
     <ClInclude Include="..\..\..\tst\vm-tests\vm-tests.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\tlib\testsuite.c" />
-    <ClCompile Include="..\..\..\src\vm\gdb.c" />
-    <ClCompile Include="..\..\..\src\vm\guest\guest.c" />
-    <ClCompile Include="..\..\..\src\vm\guest\linux.c" />
-    <ClCompile Include="..\..\..\src\vm\load.c" />
-    <ClCompile Include="..\..\..\src\vm\result.c" />
-    <ClCompile Include="..\..\..\src\vm\run.c" />
-    <ClCompile Include="..\..\..\src\vm\textconf.c" />
-    <ClCompile Include="..\..\..\src\vm\vm-win.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\debug-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\run-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\textconf-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\vm-tests.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\vm.dll.vcxproj">
+      <Project>{5ed6cfb5-de03-43e2-83b7-d7e4ccfea742}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

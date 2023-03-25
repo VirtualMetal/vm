@@ -17,6 +17,6 @@
 vm_result_t vm_guest_linux_runcmd(void *context,
     vm_runcmd_t *runcmd, char phase, const char *value);
 
-vm_runcmd_t *vm_guest_runcmds();
+vm_runcmd_t *vm_guest_runcmds(void);
 
 #endif

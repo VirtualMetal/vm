@@ -1,9 +1,9 @@
 Tags = ["program"]
 
 Include = [
-    "../../inc/**/*.h",
-    "../../src/**/*.h",
+    "../../inc/vm/vm.h",
+    "../../src/vm/internal.h",
 ]
 Compile = [
-    "../../src/**/*.c",
+    "../../src/vm/program.c",
 ]

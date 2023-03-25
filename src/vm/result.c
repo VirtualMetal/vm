@@ -13,6 +13,7 @@
 
 #include <vm/internal.h>
 
+VM_API
 const char *vm_result_error_string(vm_result_t result)
 {
     switch (vm_result_error(result))

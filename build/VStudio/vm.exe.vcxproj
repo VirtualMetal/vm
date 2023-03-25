@@ -46,7 +46,6 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
-      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(OutDir)$(TargetFileName).map</MapFileName>
@@ -61,7 +60,6 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
-      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
       <MapFileName>$(OutDir)$(TargetFileName).map</MapFileName>
@@ -69,21 +67,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\inc\vm\vm.h" />
-    <ClInclude Include="..\..\src\arch\arch.h" />
-    <ClInclude Include="..\..\src\arch\x64.h" />
-    <ClInclude Include="..\..\src\vm\guest\guest.h" />
     <ClInclude Include="..\..\src\vm\internal.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\gdb.c" />
-    <ClCompile Include="..\..\src\vm\guest\guest.c" />
-    <ClCompile Include="..\..\src\vm\guest\linux.c" />
-    <ClCompile Include="..\..\src\vm\load.c" />
     <ClCompile Include="..\..\src\vm\program.c" />
-    <ClCompile Include="..\..\src\vm\result.c" />
-    <ClCompile Include="..\..\src\vm\run.c" />
-    <ClCompile Include="..\..\src\vm\textconf.c" />
-    <ClCompile Include="..\..\src\vm\vm-win.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="vm.dll.vcxproj">
+      <Project>{5ed6cfb5-de03-43e2-83b7-d7e4ccfea742}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -27,7 +27,6 @@
 #endif
 
 #include <vm/vm.h>
-#include <vm/guest/guest.h>
 #include <arch/arch.h>
 
 #if defined(_WIN64)
@@ -246,6 +245,30 @@ int unlink(const char *path)
 }
 
 /*
+ * dlopen/dlsym/dlclose
+ */
+
+#define RTLD_LOCAL                      0
+
+static inline
+void *dlopen(const char *path, int flags)
+{
+    return LoadLibraryA(path);
+}
+
+static inline
+int dlclose(void *handle)
+{
+    return FreeLibrary(handle) ? 0 : -1;
+}
+
+static inline
+void *dlsym(void *handle, const char *sym)
+{
+    return GetProcAddress(handle, sym);
+}
+
+/*
  * miscellaneous
  */
 
@@ -306,6 +329,7 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #elif defined(__linux__)
 
 #define _GNU_SOURCE
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>

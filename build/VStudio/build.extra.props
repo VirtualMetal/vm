@@ -35,11 +35,13 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(ApplicationType)|$(Configuration)'=='Linux|Debug'">
     <ClCompile>
+      <ForcedIncludeFiles>$(MyTopDir)\ext\glibc-compat\glibc-2.17.h</ForcedIncludeFiles>
       <CLanguageStandard>c11</CLanguageStandard>
       <StrictAliasing>false</StrictAliasing>
       <ExceptionHandling>Disabled</ExceptionHandling>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <CAdditionalWarning>conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
+      <SymbolsHiddenByDefault>true</SymbolsHiddenByDefault>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -48,10 +50,12 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(ApplicationType)|$(Configuration)'=='Linux|Release'">
     <ClCompile>
+      <ForcedIncludeFiles>$(MyTopDir)\ext\glibc-compat\glibc-2.17.h</ForcedIncludeFiles>
       <CLanguageStandard>c11</CLanguageStandard>
       <StrictAliasing>false</StrictAliasing>
       <ExceptionHandling>Disabled</ExceptionHandling>
       <WarningLevel>EnableAllWarnings</WarningLevel>
+      <SymbolsHiddenByDefault>true</SymbolsHiddenByDefault>
       <CAdditionalWarning>conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>

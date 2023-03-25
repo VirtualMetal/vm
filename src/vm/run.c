@@ -16,11 +16,13 @@
 static vm_result_t vm_runcmd_dispatch(void *context, vm_runcmd_t *runcmds,
     char phase, bmap_t *valid, unsigned index, char *p);
 
+VM_API
 vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance)
 {
     return vm_run_ex(default_config, tconfigv, 0, pinstance);
 }
 
+VM_API
 vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_runcmd_t *runcmds,
     vm_t **pinstance)
 {
@@ -80,7 +82,21 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
      */
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
-        if (CMD("log"))
+        if (CMD("plugin"))
+        {
+            CHK(0 == runcmds);
+
+            void *plugin = dlopen(p, RTLD_LOCAL);
+            CHK(0 != plugin);
+
+            vm_plugin_runcmds_t *vm_plugin_runcmds = dlsym(plugin, "vm_plugin_runcmds");
+            if (0 == vm_plugin_runcmds)
+                dlclose(plugin);
+            CHK(0 != vm_plugin_runcmds);
+
+            runcmds = vm_plugin_runcmds();
+        }
+        else if (CMD("log"))
         {
             config.logf = strtoullint(p, &p, +1) ? config.logf : 0;
             CHK('\0' == *p);

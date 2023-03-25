@@ -256,6 +256,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_load(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
     int file, vm_count_t flags)

@@ -20,6 +20,7 @@ static vm_result_t vm_parse_text_config_internal(int *ptconfigc, char ***ptconfi
 static vm_result_t vm_parse_text_config_file(const char *path,
     int *pfconfigc, char ***pfconfigv, char **ptextbuf);
 
+VM_API
 vm_result_t vm_parse_text_config(int *ptconfigc, char ***ptconfigv)
 {
     int tconfigc = 0 != ptconfigc ? *ptconfigc : 0;
@@ -240,6 +241,7 @@ exit:
     return result;
 }
 
+VM_API
 vm_result_t vm_free_text_config(char **tconfigv)
 {
     void **index = (void **)tconfigv;

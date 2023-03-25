@@ -110,7 +110,7 @@ int main(int argc, char **argv)
     if (!vm_result_check(result))
         goto exit;
 
-    result = vm_run_ex(&default_config, tconfigv, vm_guest_runcmds(), &instance);
+    result = vm_run(&default_config, tconfigv, &instance);
     if (!vm_result_check(result))
         goto exit;
 

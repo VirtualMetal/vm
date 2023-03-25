@@ -12,8 +12,9 @@
  */
 
 #include <vm/internal.h>
+#include <vm/guest/guest.h>
 
-vm_runcmd_t *vm_guest_runcmds()
+vm_runcmd_t *vm_guest_runcmds(void)
 {
     static vm_runcmd_t runcmds[] =
     {

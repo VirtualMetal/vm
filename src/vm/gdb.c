@@ -49,6 +49,7 @@ static vm_result_t vm_gdb_sendstop_oob(struct vm_gdb_state *state, unsigned char
 static void hex_to_bin(char *p, unsigned char *q);
 static void bin_to_hex(unsigned char *p, char *q);
 
+VM_API
 vm_result_t vm_gdb(vm_t *instance,
     vm_result_t (*strm)(void *strmdata, int dir, void *buffer, vm_count_t *plength),
     void *strmdata)

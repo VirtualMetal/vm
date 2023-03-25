@@ -14,6 +14,12 @@
 #ifndef VM_VM_H_INCLUDED
 #define VM_VM_H_INCLUDED
 
+#if defined(_MSC_VER)
+#elif defined(__GNUC__)
+#else
+#error unknown compiler
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,6 +28,16 @@ extern "C" {
 #define VM_STATIC_ASSERT(E)             static_assert(E, #E)
 #else
 #define VM_STATIC_ASSERT(E)             _Static_assert(E, #E)
+#endif
+
+#if defined(_MSC_VER) && defined(VM_API_INTERNAL)
+#define VM_API                          __declspec(dllexport)
+#elif defined(_MSC_VER) && !defined(VM_API_INTERNAL)
+#define VM_API                          __declspec(dllimport)
+#elif defined(__GNUC__) && defined(VM_API_INTERNAL)
+#define VM_API                          __attribute__((__visibility__("default")))
+#elif defined(__GNUC__) && !defined(VM_API_INTERNAL)
+#define VM_API
 #endif
 
 typedef long long vm_result_t;
@@ -47,11 +63,13 @@ typedef long long vm_result_t;
 #define vm_result_reason(R)             ((vm_result_t)(R) & VM_RESULT_REASON_MASK)
 #define vm_result_check(R)              ((vm_result_t)(R) >= VM_RESULT_SUCCESS)
 
+VM_API
 const char *vm_result_error_string(vm_result_t result);
 
 typedef struct vm vm_t;
 typedef struct vm_config vm_config_t;
 typedef struct vm_runcmd vm_runcmd_t;
+typedef vm_runcmd_t *vm_plugin_runcmds_t(void);
 typedef struct vm_mmap vm_mmap_t;
 typedef unsigned long long vm_count_t;
 
@@ -127,6 +145,7 @@ struct vm_runcmd
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance);
 
 /**
@@ -143,6 +162,7 @@ vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pi
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_runcmd_t *runcmds,
     vm_t **pinstance);
 
@@ -156,6 +176,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance);
 
 /**
@@ -166,6 +187,7 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance);
  * @return
  *     VM_RESULT_SUCCESS.
  */
+VM_API
 vm_result_t vm_delete(vm_t *instance);
 
 /**
@@ -198,6 +220,7 @@ vm_result_t vm_delete(vm_t *instance);
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_mmap(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
     void *host_address, int file, vm_count_t file_offset, vm_count_t file_length,
@@ -215,6 +238,7 @@ vm_result_t vm_mmap(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS.
  */
+VM_API
 vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map);
 
 /**
@@ -232,6 +256,7 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map);
  * @return
  *     VM_RESULT_SUCCESS.
  */
+VM_API
 vm_result_t vm_mmap_read(vm_mmap_t *map,
     vm_count_t offset, void *buffer, vm_count_t *plength);
 
@@ -250,6 +275,7 @@ vm_result_t vm_mmap_read(vm_mmap_t *map,
  * @return
  *     VM_RESULT_SUCCESS.
  */
+VM_API
 vm_result_t vm_mmap_write(vm_mmap_t *map,
     void *buffer, vm_count_t offset, vm_count_t *plength);
 
@@ -279,6 +305,7 @@ vm_result_t vm_mmap_write(vm_mmap_t *map,
  * @return
  *     VM_RESULT_SUCCESS.
  */
+VM_API
 vm_result_t vm_mread(vm_t *instance,
     vm_count_t guest_address, void *buffer, vm_count_t *plength);
 
@@ -308,6 +335,7 @@ vm_result_t vm_mread(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS.
  */
+VM_API
 vm_result_t vm_mwrite(vm_t *instance,
     void *buffer, vm_count_t guest_address, vm_count_t *plength);
 
@@ -329,6 +357,7 @@ vm_result_t vm_mwrite(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask);
 
 /**
@@ -344,6 +373,7 @@ vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t ma
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_start(vm_t *instance);
 
 /**
@@ -360,6 +390,7 @@ vm_result_t vm_start(vm_t *instance);
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_wait(vm_t *instance);
 
 /**
@@ -376,6 +407,7 @@ vm_result_t vm_wait(vm_t *instance);
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_terminate(vm_t *instance);
 
 #define VM_DEBUG_ATTACH                 ((vm_count_t)'A')   /**< attach debugger to VM instance */
@@ -432,6 +464,7 @@ struct vm_debug_step_range
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_debug(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength);
@@ -453,6 +486,7 @@ vm_result_t vm_debug(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_debug_server_start(vm_t *instance,
     const char *hostname, const char *servname);
 
@@ -468,6 +502,7 @@ vm_result_t vm_debug_server_start(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_debug_server_stop(vm_t *instance);
 
 /**
@@ -486,6 +521,7 @@ vm_result_t vm_debug_server_stop(vm_t *instance);
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_gdb(vm_t *instance,
     vm_result_t (*strm)(void *strmdata, int dir, void *buffer, vm_count_t *plength),
     void *strmdata);
@@ -512,6 +548,7 @@ vm_result_t vm_gdb(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_load(vm_t *instance,
     vm_count_t guest_address, vm_count_t length,
     int file, vm_count_t flags);
@@ -530,6 +567,7 @@ vm_result_t vm_load(vm_t *instance,
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_parse_text_config(int *ptconfigc, char ***ptconfigv);
 
 /**
@@ -541,6 +579,7 @@ vm_result_t vm_parse_text_config(int *ptconfigc, char ***ptconfigv);
  * @return
  *     VM_RESULT_SUCCESS or error code.
  */
+VM_API
 vm_result_t vm_free_text_config(char **tconfigv);
 
 #ifdef __cplusplus
