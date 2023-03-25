@@ -16,7 +16,6 @@ Compile = \
 	../../src/vm/vm-lnx.c
 Incdirs = ../../src ../../inc
 
-TargetExt = .so
 CPPFLAGS = -DVM_API_INTERNAL
 CFLAGS = -fpic
 LDFLAGS = -shared

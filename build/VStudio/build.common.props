@@ -2,7 +2,7 @@
 
   <!-- properties (common) -->
   <PropertyGroup>
-    <TargetName>$([System.IO.Path]::GetFileNameWithoutExtension($(ProjectName)))</TargetName>
+    <TargetName>$([System.IO.Path]::GetFileNameWithoutExtension($(ProjectName)).Replace('-win','').Replace('-lnx','').Replace('-exe','').Replace('-dll',''))</TargetName>
     <OutDir>$(SolutionDir)build\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)build\$(ProjectName).build\$(Configuration)\$(PlatformTarget)\</IntDir>
     <MyTopDir>$([MSBuild]::EnsureTrailingSlash($([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), .git/HEAD))))</MyTopDir>

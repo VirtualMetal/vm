@@ -3,19 +3,19 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.4.33205.214
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm.exe", "vm.exe.vcxproj", "{66053436-60D7-4EB2-BA98-0BA69EC590E4}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-exe-win", "vm-exe-win.vcxproj", "{66053436-60D7-4EB2-BA98-0BA69EC590E4}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm.dll", "vm.dll.vcxproj", "{5ED6CFB5-DE03-43E2-83B7-D7E4CCFEA742}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-dll-win", "vm-dll-win.vcxproj", "{5ED6CFB5-DE03-43E2-83B7-D7E4CCFEA742}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm.lnx", "vm.lnx.vcxproj", "{56DA6856-0092-4BEC-A55F-24B664F337F2}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-exe-lnx", "vm-exe-lnx.vcxproj", "{56DA6856-0092-4BEC-A55F-24B664F337F2}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm.so", "vm.so.vcxproj", "{87804FC4-D1AE-4B78-BA83-5F32927ACE07}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-dll-lnx", "vm-dll-lnx.vcxproj", "{87804FC4-D1AE-4B78-BA83-5F32927ACE07}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "testing", "testing", "{C6FC23C4-5BE5-46A5-8E33-1178A445378D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-tests.exe", "testing\vm-tests.exe.vcxproj", "{910B8EF7-18CC-4267-BC75-3BC1F1EA8CF3}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-tests-win", "testing\vm-tests-win.vcxproj", "{910B8EF7-18CC-4267-BC75-3BC1F1EA8CF3}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-tests.lnx", "testing\vm-tests.lnx.vcxproj", "{38DB35B4-D881-4601-AA45-A24A79E4DB29}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm-tests-lnx", "testing\vm-tests-lnx.vcxproj", "{38DB35B4-D881-4601-AA45-A24A79E4DB29}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

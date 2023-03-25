@@ -11,9 +11,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{56da6856-0092-4bec-a55f-24b664f337f2}</ProjectGuid>
+    <ProjectGuid>{38db35b4-d881-4601-aa45-a24a79e4db29}</ProjectGuid>
     <Keyword>Linux</Keyword>
-    <RootNamespace>vmlnx</RootNamespace>
+    <RootNamespace>vm_tests_lnx</RootNamespace>
     <MinimumVisualStudioVersion>15.0</MinimumVisualStudioVersion>
     <ApplicationType>Linux</ApplicationType>
     <ApplicationTypeRevision>1.0</ApplicationTypeRevision>
@@ -36,7 +36,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>..\..\src;..\..\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\..\tst;..\..\..\src;..\..\..\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalOptions>-Wl,-rpath,'$ORIGIN' %(AdditionalOptions)</AdditionalOptions>
@@ -44,21 +44,26 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>..\..\src;..\..\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\..\tst;..\..\..\src;..\..\..\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalOptions>-Wl,-rpath,'$ORIGIN' %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\inc\vm\vm.h" />
-    <ClInclude Include="..\..\src\vm\internal.h" />
+    <ClInclude Include="..\..\..\inc\vm\vm.h" />
+    <ClInclude Include="..\..\..\src\tlib\testsuite.h" />
+    <ClInclude Include="..\..\..\tst\vm-tests\vm-tests.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\program.c" />
+    <ClCompile Include="..\..\..\src\tlib\testsuite.c" />
+    <ClCompile Include="..\..\..\tst\vm-tests\debug-test.c" />
+    <ClCompile Include="..\..\..\tst\vm-tests\run-test.c" />
+    <ClCompile Include="..\..\..\tst\vm-tests\textconf-test.c" />
+    <ClCompile Include="..\..\..\tst\vm-tests\vm-tests.c" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="vm.so.vcxproj">
+    <ProjectReference Include="..\vm-dll-lnx.vcxproj">
       <Project>{87804fc4-d1ae-4b78-ba83-5f32927ace07}</Project>
     </ProjectReference>
   </ItemGroup>

@@ -8,13 +8,13 @@ Compile := $(abspath $(Compile))
 Incdirs := $(abspath $(Incdirs))
 
 ProjectName ?= $(basename $(notdir $(firstword $(MAKEFILE_LIST))))
-TargetName ?= $(basename $(ProjectName))
-TargetExt ?=
+TargetName ?= $(subst -dll,,$(subst -exe,,$(subst -lnx,,$(ProjectName))))
+TargetExt ?= $(if $(findstring -dll,$(ProjectName)),.so,)
+TargetFileName ?= $(TargetName)$(TargetExt)
 Configuration ?= Debug
 PlatformTarget ?= x64
 OutDir ?= $(makdir)/build/$(Configuration)
 IntDir ?= $(makdir)/build/$(ProjectName).build/$(Configuration)/$(PlatformTarget)
-TargetFileName ?= $(TargetName)$(TargetExt)
 
 CC = g++
 CPPFLAGS += -include $(abspath $(topdir)/ext/glibc-compat/glibc-2.17.h)

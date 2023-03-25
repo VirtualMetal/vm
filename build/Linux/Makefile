@@ -1,8 +1,8 @@
-goal: so lnx
+goal: dll exe
 
-so:
-	$(MAKE) -f vm.so.mk
+dll:
+	$(MAKE) -f vm-dll-lnx.mk
 
-lnx: so
-	$(MAKE) -f vm.lnx.mk
-	$(MAKE) -C testing -f vm-tests.lnx.mk
+exe: dll
+	$(MAKE) -f vm-exe-lnx.mk
+	$(MAKE) -C testing -f vm-tests-lnx.mk
