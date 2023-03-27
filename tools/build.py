@@ -73,6 +73,8 @@ def build_msbuild(args):
                     if "" == l or (not l.startswith(" ") and l.endswith(".sln:")):
                         projind += 1
                         break
+                    prfx = l[:len(l) - len(l.lstrip())]
+                    l = l.replace("&#10;", "\n" + prfx)
                     print(l)
                 projmap[id] = []
                 if not done:

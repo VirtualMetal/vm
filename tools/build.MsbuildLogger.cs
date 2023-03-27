@@ -118,7 +118,7 @@ namespace VirtualMetal.Build
                 var Beea = (BuildErrorEventArgs)Args;
                 var Code = String.Format("error {0}", Beea.Code).Trim();
                 return
-                    String.Format("  {0}:{1}:{2}: {3}: ", Beea.File, Beea.LineNumber, Beea.ColumnNumber, Code) +
+                    String.Format("    {0}:{1}:{2}: {3}: ", Beea.File, Beea.LineNumber, Beea.ColumnNumber, Code) +
                     FlattenMessage(Args.Message);
             }
             else if (Args is BuildWarningEventArgs)
@@ -126,7 +126,7 @@ namespace VirtualMetal.Build
                 var Bwea = (BuildWarningEventArgs)Args;
                 var Code = String.Format("warning {0}", Bwea.Code).Trim();
                 return
-                    String.Format("  {0}:{1}:{2}: {3}: ", Bwea.File, Bwea.LineNumber, Bwea.ColumnNumber, Code) +
+                    String.Format("    {0}:{1}:{2}: {3}: ", Bwea.File, Bwea.LineNumber, Bwea.ColumnNumber, Code) +
                     FlattenMessage(Args.Message);
             }
             else if (Args is BuildMessageEventArgs)
