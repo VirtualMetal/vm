@@ -248,6 +248,7 @@ int unlink(const char *path)
  * dlopen/dlsym/dlclose
  */
 
+#define RTLD_NOW                        0
 #define RTLD_LOCAL                      0
 
 static inline

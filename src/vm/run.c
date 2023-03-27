@@ -86,7 +86,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
         {
             CHK(0 == runcmds);
 
-            void *plugin = dlopen(p, RTLD_LOCAL);
+            void *plugin = dlopen(p, RTLD_NOW | RTLD_LOCAL);
             CHK(0 != plugin);
 
             vm_plugin_runcmds_t *vm_plugin_runcmds = dlsym(plugin, "vm_plugin_runcmds");
