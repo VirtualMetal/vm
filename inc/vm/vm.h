@@ -30,14 +30,17 @@ extern "C" {
 #define VM_STATIC_ASSERT(E)             _Static_assert(E, #E)
 #endif
 
-#if defined(_MSC_VER) && defined(VM_API_INTERNAL)
-#define VM_API                          __declspec(dllexport)
-#elif defined(_MSC_VER) && !defined(VM_API_INTERNAL)
-#define VM_API                          __declspec(dllimport)
-#elif defined(__GNUC__) && defined(VM_API_INTERNAL)
-#define VM_API                          __attribute__((__visibility__("default")))
-#elif defined(__GNUC__) && !defined(VM_API_INTERNAL)
-#define VM_API
+#if defined(_MSC_VER)
+#define VM_API_EXPORT                   __declspec(dllexport)
+#define VM_API_IMPORT                   __declspec(dllimport)
+#elif defined(__GNUC__)
+#define VM_API_EXPORT                   __attribute__((__visibility__("default")))
+#define VM_API_IMPORT
+#endif
+#if defined(VM_API_INTERNAL)
+#define VM_API                          VM_API_EXPORT
+#else
+#define VM_API                          VM_API_IMPORT
 #endif
 
 typedef long long vm_result_t;

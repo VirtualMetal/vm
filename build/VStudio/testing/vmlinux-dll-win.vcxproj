@@ -13,8 +13,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{5ed6cfb5-de03-43e2-83b7-d7e4ccfea742}</ProjectGuid>
-    <RootNamespace>vmdll</RootNamespace>
+    <ProjectGuid>{0d422927-a97b-4845-9a80-4e4e5a33daeb}</ProjectGuid>
+    <RootNamespace>vmlinuxdllwin</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -38,48 +38,44 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>VM_API_INTERNAL;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\src;..\..\inc</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\..\tst;..\..\..\src;..\..\..\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>VM_API_INTERNAL;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\src;..\..\inc</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\..\tst;..\..\..\src;..\..\..\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhvplatform.lib;winhvemulation.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <ProgramDatabaseFile>$(OutDir)$(TargetFileName).pdb</ProgramDatabaseFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\inc\vm\vm.h" />
-    <ClInclude Include="..\..\src\arch\arch.h" />
-    <ClInclude Include="..\..\src\arch\x64.h" />
-    <ClInclude Include="..\..\src\vm\internal.h" />
+    <ClInclude Include="..\..\..\inc\vm\vm.h" />
+    <ClInclude Include="..\..\..\tst\vmlinux\plugin.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\vm\gdb.c" />
-    <ClCompile Include="..\..\src\vm\library.c" />
-    <ClCompile Include="..\..\src\vm\load.c" />
-    <ClCompile Include="..\..\src\vm\result.c" />
-    <ClCompile Include="..\..\src\vm\run.c" />
-    <ClCompile Include="..\..\src\vm\textconf.c" />
-    <ClCompile Include="..\..\src\vm\vm-win.c" />
+    <ClCompile Include="..\..\..\tst\vmlinux\linux.c" />
+    <ClCompile Include="..\..\..\tst\vmlinux\plugin.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\vm-dll-win.vcxproj">
+      <Project>{5ed6cfb5-de03-43e2-83b7-d7e4ccfea742}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

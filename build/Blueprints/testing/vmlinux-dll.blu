@@ -1,0 +1,9 @@
+Tags = ["plugin"]
+
+Include = [
+    "../../../inc/vm/vm.h",
+    "../../../tst/vmlinux/*.h",
+]
+Compile = [
+    "../../../tst/vmlinux/*.c",
+]

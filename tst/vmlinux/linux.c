@@ -1,5 +1,5 @@
 /**
- * @file vm/guest/linux.c
+ * @file vmlinux/linux.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */
@@ -11,8 +11,7 @@
  * Software Foundation.
  */
 
-#include <vm/internal.h>
-#include <vm/guest/guest.h>
+#include <vmlinux/plugin.h>
 
 /*
  * Memory Layout for Linux guest
@@ -33,13 +32,13 @@
  * e000     Linux boot_params
  * f000     Linux command line
  */
-#define VM_GUEST_LINUX_MEMORY_SIZEMIN   (16 * 1024 * 1024)
-#define VM_GUEST_LINUX_ACPI_TABLE       (0x1000)
-#define VM_GUEST_LINUX_VCPU_TABLE       (0x4000)
-#define VM_GUEST_LINUX_MAILBOX          (0x5000)
-#define VM_GUEST_LINUX_PAGE_TABLE       (0x7000)
-#define VM_GUEST_LINUX_BOOT_PARAMS      (0xe000)
-#define VM_GUEST_LINUX_CMD_LINE         (0xf000)
+#define VM_PLUGIN_LINUX_MEMORY_SIZEMIN  (16 * 1024 * 1024)
+#define VM_PLUGIN_LINUX_ACPI_TABLE      (0x1000)
+#define VM_PLUGIN_LINUX_VCPU_TABLE      (0x4000)
+#define VM_PLUGIN_LINUX_MAILBOX         (0x5000)
+#define VM_PLUGIN_LINUX_PAGE_TABLE      (0x7000)
+#define VM_PLUGIN_LINUX_BOOT_PARAMS     (0xe000)
+#define VM_PLUGIN_LINUX_CMD_LINE        (0xf000)
 
 /* ACPI 6.4 */
 ARCH_PACK(struct acpi_rsdp
@@ -255,14 +254,14 @@ struct vm
     vm_config_t config;
 };
 
-static vm_result_t vm_guest_linux_runcmd_c(vm_config_t *config,
+static vm_result_t vm_plugin_linux_runcmd_c(vm_config_t *config,
     vm_runcmd_t *runcmd, char phase, const char *value);
-static vm_result_t vm_guest_linux_runcmd_m(vm_t *instance,
+static vm_result_t vm_plugin_linux_runcmd_m(vm_t *instance,
     vm_runcmd_t *runcmd, char phase, const char *value);
-static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance);
-static vm_result_t vm_guest_linux_setup_page_table(vm_t *instance);
-static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size);
-static vm_result_t vm_guest_linux_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance);
+static vm_result_t vm_plugin_linux_setup_page_table(vm_t *instance);
+static vm_result_t vm_plugin_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size);
+static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 
 /* adapted from vm_run: check macro */
@@ -270,29 +269,29 @@ static vm_result_t vm_guest_linux_xmio(void *user_context, vm_count_t vcpu_index
     if (C) ; else { result = vm_result(VM_ERROR_CONFIG, 0); goto exit; } \
     while (0)
 
-vm_result_t vm_guest_linux_runcmd(void *context,
+vm_result_t vm_plugin_linux_runcmd(void *context,
     vm_runcmd_t *runcmd, char phase, const char *value)
 {
     switch (phase)
     {
     case VM_RUNCMD_PHASE_CREATE:
-        return vm_guest_linux_runcmd_c(context, runcmd, phase, value);
+        return vm_plugin_linux_runcmd_c(context, runcmd, phase, value);
     case VM_RUNCMD_PHASE_MEMORY:
-        return vm_guest_linux_runcmd_m(context, runcmd, phase, value);
+        return vm_plugin_linux_runcmd_m(context, runcmd, phase, value);
     default:
         return VM_RESULT_SUCCESS;
     }
 }
 
-static vm_result_t vm_guest_linux_runcmd_c(vm_config_t *config,
+static vm_result_t vm_plugin_linux_runcmd_c(vm_config_t *config,
     vm_runcmd_t *runcmd, char phase, const char *value)
 {
-    config->xmio = vm_guest_linux_xmio;
+    config->xmio = vm_plugin_linux_xmio;
     config->passthrough = 1;
     return VM_RESULT_SUCCESS;
 }
 
-static vm_result_t vm_guest_linux_runcmd_m(vm_t *instance,
+static vm_result_t vm_plugin_linux_runcmd_m(vm_t *instance,
     vm_runcmd_t *runcmd, char phase, const char *value)
 {
     vm_result_t result;
@@ -302,8 +301,8 @@ static vm_result_t vm_guest_linux_runcmd_m(vm_t *instance,
 
     length = strtoullint(value, &p, +1);
     CHK(',' == *p);
-    if (length < VM_GUEST_LINUX_MEMORY_SIZEMIN)
-        length = VM_GUEST_LINUX_MEMORY_SIZEMIN;
+    if (length < VM_PLUGIN_LINUX_MEMORY_SIZEMIN)
+        length = VM_PLUGIN_LINUX_MEMORY_SIZEMIN;
 
     /* load ELF linux kernel for execution */
     file = open(p + 1, O_RDONLY);
@@ -319,17 +318,17 @@ static vm_result_t vm_guest_linux_runcmd_m(vm_t *instance,
         goto exit;
 
     /* setup ACPI */
-    result = vm_guest_linux_setup_acpi_table(instance);
+    result = vm_plugin_linux_setup_acpi_table(instance);
     if (!vm_result_check(result))
         goto exit;
 
     /* setup identity mapped page table */
-    result = vm_guest_linux_setup_page_table(instance);
+    result = vm_plugin_linux_setup_page_table(instance);
     if (!vm_result_check(result))
         goto exit;
 
     /* setup boot_params */
-    result = vm_guest_linux_setup_boot_params(instance, length);
+    result = vm_plugin_linux_setup_boot_params(instance, length);
     if (!vm_result_check(result))
         goto exit;
 
@@ -339,7 +338,7 @@ exit:
     return result;
 }
 
-static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance)
+static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
 {
     ARCH_PACK(struct acpi_table
     {
@@ -358,14 +357,14 @@ static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance)
         .rsdp.signature = "RSD PTR ",
         .rsdp.revision = 2,
         .rsdp.length = sizeof(struct acpi_rsdp),
-        .rsdp.xsdt_address = VM_GUEST_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->xsdt,
+        .rsdp.xsdt_address = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->xsdt,
         /* XSDT */
         .xsdt.header.signature = "XSDT",
         .xsdt.header.length = sizeof(struct acpi_xsdt) + sizeof ((struct acpi_table *)0)->xsdt_entries,
         .xsdt.header.revision = 1,
-        .xsdt_entries[0] = VM_GUEST_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->fadt,
-        .xsdt_entries[1] = VM_GUEST_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->dsdt,
-        .xsdt_entries[2] = VM_GUEST_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->madt,
+        .xsdt_entries[0] = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->fadt,
+        .xsdt_entries[1] = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->dsdt,
+        .xsdt_entries[2] = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->madt,
         /* FADT */
         .fadt.header.signature = "FACP",
         .fadt.header.length = sizeof(struct acpi_fadt),
@@ -373,7 +372,7 @@ static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance)
         .fadt.fadt_minor_version = 4,
         .fadt.iapc_boot_arch = 0x3c,    /* no legacy devs, no 8042, no VGA, no MSI, no ASPM, no CMOS */
         .fadt.flags = (1 << 20),        /* HW_REDUCED_ACPI */
-        .fadt.x_dsdt = VM_GUEST_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->dsdt,
+        .fadt.x_dsdt = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->dsdt,
         .fadt.hypervisor_vendor_identity = "VrtMetal",
         /* DSDT */
         .dsdt.header.signature = "DSDT",
@@ -405,7 +404,7 @@ static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance)
     acpi_store_checksum(&acpi_table.fadt, &acpi_table.fadt.header.checksum);
     acpi_store_checksum(&acpi_table.dsdt, &acpi_table.dsdt.header.checksum);
 
-    guest_address = VM_GUEST_LINUX_ACPI_TABLE;
+    guest_address = VM_PLUGIN_LINUX_ACPI_TABLE;
     length = sizeof acpi_table;
     vm_mwrite(instance,
         &acpi_table,
@@ -428,7 +427,7 @@ static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance)
     madt.wakeup.type = 0x10;            /* multiprocessor wakeup */
     madt.wakeup.length = sizeof madt.wakeup;
     madt.wakeup.mailbox_version = 0;
-    madt.wakeup.mailbox_address = VM_GUEST_LINUX_MAILBOX;
+    madt.wakeup.mailbox_address = VM_PLUGIN_LINUX_MAILBOX;
     for (vm_count_t index = 0; instance->config.vcpu_count > index; index++)
     {
         madt.lapic[index].type = 0;     /* processor local apic */
@@ -440,7 +439,7 @@ static vm_result_t vm_guest_linux_setup_acpi_table(vm_t *instance)
     acpi_store_checksum_ex(
         &madt.base, &madt.base.header.checksum, &madt.lapic[instance->config.vcpu_count]);
 
-    guest_address = VM_GUEST_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->madt;
+    guest_address = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->madt;
     length = madt.base.header.length;
     vm_mwrite(instance,
         &madt.base,
@@ -454,13 +453,13 @@ exit:
     return result;
 }
 
-static vm_result_t vm_guest_linux_setup_page_table(vm_t *instance)
+static vm_result_t vm_plugin_linux_setup_page_table(vm_t *instance)
 {
     vm_result_t result;
     vm_config_t config;
     vm_count_t pg0_address, pg1_address, pg1_count, guest_address, length;
 
-    pg0_address = VM_GUEST_LINUX_PAGE_TABLE;
+    pg0_address = VM_PLUGIN_LINUX_PAGE_TABLE;
     pg1_address = pg0_address + 4096;
     pg1_count = 1;  /* 512G of identity mapped memory */
 
@@ -491,7 +490,7 @@ static vm_result_t vm_guest_linux_setup_page_table(vm_t *instance)
     }
 
     memset(&config, 0, sizeof config);
-    config.page_table = VM_GUEST_LINUX_PAGE_TABLE;
+    config.page_table = VM_PLUGIN_LINUX_PAGE_TABLE;
     vm_reconfig(instance, &config, VM_CONFIG_BIT(page_table));
 
     result = VM_RESULT_SUCCESS;
@@ -500,7 +499,7 @@ exit:
     return result;
 }
 
-static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size)
+static vm_result_t vm_plugin_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size)
 {
     vm_result_t result;
     vm_config_t config;
@@ -514,8 +513,8 @@ static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t m
     };
     struct setup_header setup_header;
 
-    guest_address = VM_GUEST_LINUX_BOOT_PARAMS + bp_acpi_rsdp_addr;
-    acpi_rsdp_addr = VM_GUEST_LINUX_ACPI_TABLE;
+    guest_address = VM_PLUGIN_LINUX_BOOT_PARAMS + bp_acpi_rsdp_addr;
+    acpi_rsdp_addr = VM_PLUGIN_LINUX_ACPI_TABLE;
     length = sizeof acpi_rsdp_addr;
     vm_mwrite(instance,
         &acpi_rsdp_addr,
@@ -523,7 +522,7 @@ static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t m
         &length);
     CHK(sizeof acpi_rsdp_addr == length);
 
-    guest_address = VM_GUEST_LINUX_BOOT_PARAMS + bp_e820_entries;
+    guest_address = VM_PLUGIN_LINUX_BOOT_PARAMS + bp_e820_entries;
     e820_entries = sizeof e820_table / sizeof e820_table[0];
     length = sizeof e820_entries;
     vm_mwrite(instance,
@@ -531,7 +530,7 @@ static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t m
         guest_address,
         &length);
     CHK(sizeof e820_entries == length);
-    guest_address = VM_GUEST_LINUX_BOOT_PARAMS + bp_e820_table;
+    guest_address = VM_PLUGIN_LINUX_BOOT_PARAMS + bp_e820_table;
     length = sizeof e820_table;
     vm_mwrite(instance,
         &e820_table,
@@ -542,8 +541,8 @@ static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t m
     memset(&setup_header, 0, sizeof setup_header);
     //setup_header.vid_mode = 0;
     setup_header.type_of_loader = 0xff;
-    setup_header.cmd_line_ptr = VM_GUEST_LINUX_CMD_LINE;
-    guest_address = VM_GUEST_LINUX_BOOT_PARAMS + bp_setup_header;
+    setup_header.cmd_line_ptr = VM_PLUGIN_LINUX_CMD_LINE;
+    guest_address = VM_PLUGIN_LINUX_BOOT_PARAMS + bp_setup_header;
     length = sizeof setup_header;
     vm_mwrite(instance,
         &setup_header,
@@ -552,9 +551,9 @@ static vm_result_t vm_guest_linux_setup_boot_params(vm_t *instance, vm_count_t m
     CHK(sizeof setup_header == length);
 
     memset(&config, 0, sizeof config);
-    config.vcpu_args[1] = VM_GUEST_LINUX_BOOT_PARAMS;
-    config.vcpu_table = VM_GUEST_LINUX_VCPU_TABLE;
-    config.vcpu_mailbox = VM_GUEST_LINUX_MAILBOX;
+    config.vcpu_args[1] = VM_PLUGIN_LINUX_BOOT_PARAMS;
+    config.vcpu_table = VM_PLUGIN_LINUX_VCPU_TABLE;
+    config.vcpu_mailbox = VM_PLUGIN_LINUX_MAILBOX;
     vm_reconfig(instance, &config,
         VM_CONFIG_BIT(vcpu_args[1]) | VM_CONFIG_BIT(vcpu_table) | VM_CONFIG_BIT(vcpu_mailbox));
 
@@ -566,7 +565,7 @@ exit:
 
 #undef CHK
 
-static vm_result_t vm_guest_linux_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     if (VM_XMIO_RD == VM_XMIO_DIR(flags))

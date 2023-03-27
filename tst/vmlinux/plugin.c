@@ -1,5 +1,5 @@
 /**
- * @file vm/guest/guest.c
+ * @file vmlinux/plugin.c
  *
  * @copyright 2022 Bill Zissimopoulos
  */
@@ -11,15 +11,17 @@
  * Software Foundation.
  */
 
-#include <vm/internal.h>
-#include <vm/guest/guest.h>
+#include <vmlinux/plugin.h>
 
-vm_runcmd_t *vm_guest_runcmds(void)
+VM_API_EXPORT
+vm_runcmd_t *vm_plugin_runcmds(void)
 {
     static vm_runcmd_t runcmds[] =
     {
-        { .name = "*linux", .fn = vm_guest_linux_runcmd },
+        { .name = "*linux", .fn = vm_plugin_linux_runcmd },
         { 0 },
     };
     return runcmds;
 }
+
+LIBMAIN;
