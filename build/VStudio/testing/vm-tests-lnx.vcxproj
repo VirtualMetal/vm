@@ -52,11 +52,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\inc\vm\vm.h" />
-    <ClInclude Include="..\..\..\src\tlib\testsuite.h" />
+    <ClInclude Include="..\..\..\tst\tlib\testsuite.h" />
     <ClInclude Include="..\..\..\tst\vm-tests\vm-tests.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\src\tlib\testsuite.c" />
+    <ClCompile Include="..\..\..\tst\tlib\testsuite.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\debug-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\run-test.c" />
     <ClCompile Include="..\..\..\tst\vm-tests\textconf-test.c" />

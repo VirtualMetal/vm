@@ -1,9 +1,9 @@
 Include = \
 	../../../inc/vm/vm.h \
-	../../../src/tlib/testsuite.h \
+	../../../tst/tlib/testsuite.h \
 	../../../tst/vm-tests/vm-tests.h
 Compile = \
-	../../../src/tlib/testsuite.c \
+	../../../tst/tlib/testsuite.c \
 	../../../tst/vm-tests/debug-test.c \
 	../../../tst/vm-tests/run-test.c \
 	../../../tst/vm-tests/textconf-test.c \

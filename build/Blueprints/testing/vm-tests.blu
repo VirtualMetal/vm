@@ -2,10 +2,10 @@ Tags = ["test"]
 
 Include = [
     "../../../inc/vm/vm.h",
-    "../../../src/tlib/*.h",
+    "../../../tst/tlib/*.h",
     "../../../tst/vm-tests/*.h",
 ]
 Compile = [
-    "../../../src/tlib/*.c",
+    "../../../tst/tlib/*.c",
     "../../../tst/vm-tests/*.c",
 ]
