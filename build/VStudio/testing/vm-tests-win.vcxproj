@@ -14,7 +14,6 @@
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{910b8ef7-18cc-4267-bc75-3bc1f1ea8cf3}</ProjectGuid>
-    <RootNamespace>vmtestsexe</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

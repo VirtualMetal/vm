@@ -13,7 +13,6 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{87804fc4-d1ae-4b78-ba83-5f32927ace07}</ProjectGuid>
     <Keyword>Linux</Keyword>
-    <RootNamespace>vmso</RootNamespace>
     <MinimumVisualStudioVersion>15.0</MinimumVisualStudioVersion>
     <ApplicationType>Linux</ApplicationType>
     <ApplicationTypeRevision>1.0</ApplicationTypeRevision>

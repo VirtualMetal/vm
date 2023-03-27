@@ -13,7 +13,6 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{56da6856-0092-4bec-a55f-24b664f337f2}</ProjectGuid>
     <Keyword>Linux</Keyword>
-    <RootNamespace>vmlnx</RootNamespace>
     <MinimumVisualStudioVersion>15.0</MinimumVisualStudioVersion>
     <ApplicationType>Linux</ApplicationType>
     <ApplicationTypeRevision>1.0</ApplicationTypeRevision>

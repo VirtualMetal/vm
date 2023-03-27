@@ -13,7 +13,6 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{38db35b4-d881-4601-aa45-a24a79e4db29}</ProjectGuid>
     <Keyword>Linux</Keyword>
-    <RootNamespace>vm_tests_lnx</RootNamespace>
     <MinimumVisualStudioVersion>15.0</MinimumVisualStudioVersion>
     <ApplicationType>Linux</ApplicationType>
     <ApplicationTypeRevision>1.0</ApplicationTypeRevision>
