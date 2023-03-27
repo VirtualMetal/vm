@@ -1,9 +1,0 @@
-Tags = ["program"]
-
-Include = [
-    "../../inc/vm/vm.h",
-    "../../src/vm/internal.h",
-]
-Compile = [
-    "../../src/vm/program.c",
-]

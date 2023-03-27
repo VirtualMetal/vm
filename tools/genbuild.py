@@ -209,9 +209,15 @@ def generate(bluedir, projdir):
             continue
         bluefile = bluefiles[k][0]
         m = execfile(bluefile)
-        for projfile in projfiles.get(k, []):
-            info("%s -> %s" % (bluefile, projfile))
-            _genmap[os.path.splitext(projfile)[1]](m.__dict__, projfile)
+        i = k.rfind("-")
+        if 0 <= i and k[i + 1:] in well_known_tags:
+            l = [k]
+        else:
+            l = [k + "-" + t for t in well_known_tags]
+        for k in l:
+            for projfile in projfiles.get(k, []):
+                info("%s -> %s" % (bluefile, projfile))
+                _genmap[os.path.splitext(projfile)[1]](m.__dict__, projfile)
 
 def main():
     builddir = os.path.relpath(os.path.join(os.path.dirname(sys.argv[0]), "..", "build"), os.getcwd())

@@ -1,9 +1,0 @@
-Tags = ["library"]
-
-Include = [
-    "../../inc/**/*.h",
-    "../../src/**/*.h",
-]
-Compile = [
-    "../../src/**/*.c",
-]
