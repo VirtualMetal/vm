@@ -16,6 +16,8 @@ PlatformTarget ?= x64
 OutDir ?= $(makdir)/build/$(Configuration)
 IntDir ?= $(makdir)/build/$(ProjectName).build/$(Configuration)/$(PlatformTarget)
 
+$(if $(filter $(Configuration),Debug Release),,$(error invalid configuration $(Configuration)))
+
 CC = g++
 CPPFLAGS += -include $(abspath $(topdir)/ext/glibc-compat/glibc-2.17.h)
 CPPFLAGS += $(foreach _,$(Incdirs),-I$(abspath $(_)))
