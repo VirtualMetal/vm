@@ -40,7 +40,7 @@
       <StrictAliasing>false</StrictAliasing>
       <ExceptionHandling>Disabled</ExceptionHandling>
       <WarningLevel>EnableAllWarnings</WarningLevel>
-      <CAdditionalWarning>conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
+      <CAdditionalWarning>no-conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
       <SymbolsHiddenByDefault>true</SymbolsHiddenByDefault>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -56,7 +56,7 @@
       <ExceptionHandling>Disabled</ExceptionHandling>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <SymbolsHiddenByDefault>true</SymbolsHiddenByDefault>
-      <CAdditionalWarning>conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
+      <CAdditionalWarning>no-conversion;no-sign-conversion;no-pointer-sign</CAdditionalWarning>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
