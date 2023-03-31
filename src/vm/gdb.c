@@ -459,6 +459,17 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             goto unrecognized;
         break;
 
+    case 'T': /* is thread alive */
+        {
+            int tid = (int)strtoullint(packet + 1, 0, -16);
+            if (0 >= tid)
+                /* we can only continue ALL threads and we can only step ONE thread */
+                tid = 1;
+            ok = tid <= state->instance->config.vcpu_count;
+        }
+        result = vm_gdb_sendres(state, ok);
+        break;
+
     case 'v': /* v-packets */
         if (0 == invariant_strncmp(packet + 1, "Cont;", sizeof "Cont;" - 1))
         {
