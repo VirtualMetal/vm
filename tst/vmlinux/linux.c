@@ -261,6 +261,7 @@ static vm_result_t vm_plugin_linux_runcmd_m(vm_t *instance,
 static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance);
 static vm_result_t vm_plugin_linux_setup_page_table(vm_t *instance);
 static vm_result_t vm_plugin_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size);
+static vm_result_t vm_plugin_linux_setup_command_line(vm_t *instance, const char *cmd_line);
 static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 
@@ -329,6 +330,11 @@ static vm_result_t vm_plugin_linux_runcmd_m(vm_t *instance,
 
     /* setup boot_params */
     result = vm_plugin_linux_setup_boot_params(instance, length);
+    if (!vm_result_check(result))
+        goto exit;
+
+    /* setup command line */
+    result = vm_plugin_linux_setup_command_line(instance, "console=ttyS0");
     if (!vm_result_check(result))
         goto exit;
 
@@ -563,6 +569,27 @@ exit:
     return result;
 }
 
+static vm_result_t vm_plugin_linux_setup_command_line(vm_t *instance, const char *cmd_line)
+{
+    vm_result_t result;
+    vm_count_t guest_address, length, cmd_line_size;
+
+    cmd_line_size = strlen(cmd_line) + 1;
+
+    guest_address = VM_PLUGIN_LINUX_CMD_LINE;
+    length = cmd_line_size;
+    vm_mwrite(instance,
+        (void *)cmd_line,
+        guest_address,
+        &length);
+    CHK(cmd_line_size == length);
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    return result;
+}
+
 #undef CHK
 
 static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_index,
@@ -570,6 +597,19 @@ static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_inde
 {
     if (VM_XMIO_RD == VM_XMIO_DIR(flags))
         memset(buffer, 0, length);
+
+    if (VM_XMIO_PMIO == VM_XMIO_KIND(flags))
+        switch (address)
+        {
+        case 0x3f8:
+            if (VM_XMIO_WR == VM_XMIO_DIR(flags))
+                write(STDOUT_FILENO, buffer, 1);
+            break;
+        case 0x3f8 + 5: /* Line Status Register */
+            if (VM_XMIO_RD == VM_XMIO_DIR(flags))
+                *(uint8_t *)buffer = 0x20;  // indicate transmission buffer empty
+            break;
+        }
 
     return VM_RESULT_SUCCESS;
 }
