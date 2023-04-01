@@ -607,7 +607,7 @@ static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_inde
             break;
         case 0x3f8 + 5: /* Line Status Register */
             if (VM_XMIO_RD == VM_XMIO_DIR(flags))
-                *(uint8_t *)buffer = 0x20;  // indicate transmission buffer empty
+                *(uint8_t *)buffer = 0x60;  // indicate transmission buffer empty
             break;
         }
 
