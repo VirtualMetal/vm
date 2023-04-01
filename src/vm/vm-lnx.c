@@ -1612,6 +1612,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
     struct arch_x64_sseg_desc sseg_desc;
     struct kvm_regs regs;
     struct kvm_sregs sregs;
+    struct kvm_mp_state mp_state;
 
     result = vm_vcpu_init_cpuid(instance, vcpu_index, vcpu_fd);
     if (!vm_result_check(result))
@@ -1753,6 +1754,17 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
     {
         result = vm_result(VM_ERROR_VCPU, errno);
         goto exit;
+    }
+
+    if (0 != vcpu_index && 0 != instance->config.vcpu_mailbox)
+    {
+        /* make sure that VCPU is runnable regardless if it is a boot or application one */
+        mp_state.mp_state = KVM_MP_STATE_RUNNABLE;
+        if (-1 == ioctl(vcpu_fd, KVM_SET_MP_STATE, &mp_state))
+        {
+            result = vm_result(VM_ERROR_VCPU, errno);
+            goto exit;
+        }
     }
 
     result = VM_RESULT_SUCCESS;

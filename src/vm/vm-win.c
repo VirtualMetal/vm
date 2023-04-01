@@ -201,6 +201,8 @@ static WHV_X64_CPUID_RESULT2 vm_vcpu_cpuid_results[] =
  */
 #define REGNAM(r)                       regn[regc] = WHvX64Register ## r, regc++
 #define REGSET(r)                       regn[regc] = WHvX64Register ## r, regv[regc++]
+#define REGNAMX(r)                      regn[regc] = r, regc++
+#define REGSETX(r)                      regn[regc] = r, regv[regc++]
 #define REGVAL(...)                     (WHV_REGISTER_VALUE){ __VA_ARGS__ }
 #define REGBIT(b)                       regb[regc - 1] = (b), regl += regb[regc - 1] >> 3
 #endif
@@ -1806,6 +1808,10 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
     REGSET(Cr3) = REGVAL(.Reg64 = instance->config.page_table);
     REGSET(Cr4) = REGVAL(.Reg64 = 0x00000020);    /* PAE=1 */
     REGSET(Efer) = REGVAL(.Reg64 = 0x00000500);   /* LMA=1,LME=1 */
+
+    if (0 != vcpu_index && 0 != instance->config.vcpu_mailbox)
+        /* make sure that VCPU is runnable regardless if it is a boot or application one */
+        REGSETX(WHvRegisterInternalActivityState) = REGVAL(.InternalActivity = { 0 });
 
     hresult = WHvSetVirtualProcessorRegisters(instance->partition,
         vcpu_index, regn, regc, regv);
