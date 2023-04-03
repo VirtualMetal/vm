@@ -87,6 +87,18 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
             CHK(0 == runcmds);
 
             void *plugin = dlopen(p, RTLD_NOW | RTLD_LOCAL);
+#if defined(__linux__)
+            /* Linux: if path does not end in .so, add and retry (match Windows .dll behavior) */
+            if (0 == plugin &&
+                (3 > (length = strlen(p)) || 0 != invariant_strcmp(p + length - 3, ".so")) &&
+                PATH_MAX > length)
+            {
+                char path[PATH_MAX];
+                memcpy(path, p, length);
+                memcpy(path + length, ".so", 3 + 1);
+                plugin = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+            }
+#endif
             CHK(0 != plugin);
 
             vm_plugin_runcmds_t *vm_plugin_runcmds = dlsym(plugin, "vm_plugin_runcmds");
