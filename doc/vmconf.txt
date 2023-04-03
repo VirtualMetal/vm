@@ -34,6 +34,9 @@
 # Create Phase
 #
 
+# Load plugin (dynamic link library / shared object).
+#plugin=<path>
+
 # Logging enable/disable.
 #log=(0|1)
 
