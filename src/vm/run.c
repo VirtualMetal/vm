@@ -218,7 +218,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
         {
             config.vcpu_entry = strtoullint(p, &p, +1);
             CHK('\0' == *p);
-            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_entry));
+            vm_setconfig(instance, &config, VM_CONFIG_BIT(vcpu_entry));
         }
         else
         if (CMD("vcpu_args"))
@@ -227,7 +227,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
             {
                 config.vcpu_args[i] = strtoullint(p, &p, +1);
                 CHK(',' == *p || '\0' == *p);
-                vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_args[i]));
+                vm_setconfig(instance, &config, VM_CONFIG_BIT(vcpu_args[i]));
                 if ('\0' == *p)
                     break;
                 p++;
@@ -248,14 +248,14 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
                 stride = 0;
             config.vcpu_table &= ~0xff;
             config.vcpu_table |= stride & 0xff;
-            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_table));
+            vm_setconfig(instance, &config, VM_CONFIG_BIT(vcpu_table));
         }
         else
         if (CMD("vcpu_alt_table") || CMD("idt"))
         {
             config.vcpu_alt_table = strtoullint(p, &p, +1);
             CHK('\0' == *p);
-            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_alt_table));
+            vm_setconfig(instance, &config, VM_CONFIG_BIT(vcpu_alt_table));
         }
 #if (defined(_MSC_VER) && defined(_M_X64)) || (defined(__GNUC__) && defined(__x86_64__))
         else
@@ -285,14 +285,14 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
         {
             config.vcpu_mailbox = strtoullint(p, &p, +1);
             CHK('\0' == *p);
-            vm_reconfig(instance, &config, VM_CONFIG_BIT(vcpu_mailbox));
+            vm_setconfig(instance, &config, VM_CONFIG_BIT(vcpu_mailbox));
         }
         else
         if (CMD("page_table") || CMD("pg0"))
         {
             config.page_table = strtoullint(p, &p, +1);
             CHK('\0' == *p);
-            vm_reconfig(instance, &config, VM_CONFIG_BIT(page_table));
+            vm_setconfig(instance, &config, VM_CONFIG_BIT(page_table));
         }
         else
         if (CMI("pg", 1, 4))

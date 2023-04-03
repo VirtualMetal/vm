@@ -241,7 +241,7 @@ vm_result_t vm_load_elf(vm_t *instance,
         vm_count_t mask = VM_CONFIG_BIT(vcpu_entry);
         if (0 != (flags & VM_LOAD_EXEC_REPORT))
             mask |= VM_CONFIG_BIT(exec_textseg) | VM_CONFIG_BIT(exec_dataseg);
-        result = vm_reconfig(instance, &config, mask);
+        result = vm_setconfig(instance, &config, mask);
         if (!vm_result_check(result))
             goto exit;
     }

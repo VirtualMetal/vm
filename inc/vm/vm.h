@@ -111,7 +111,7 @@ VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 #define VM_CONFIG_INDEX(F)              ((vm_count_t)&((vm_config_t *)0)->F / sizeof(vm_count_t))
 #define VM_CONFIG_BIT(F)                ((vm_count_t)(1ULL << VM_CONFIG_INDEX(F)))
 #define VM_CONFIG_FIELD(C, I)           (*(vm_count_t *)((char *)(C) + I * sizeof(vm_count_t)))
-#define VM_CONFIG_RECONFIG_MASK         ((vm_count_t)0xffffffff00000000ULL)
+#define VM_CONFIG_SETCONFIG_MASK        ((vm_count_t)0xffffffff00000000ULL)
 
 #define VM_CONFIG_LOG_HYPERVISOR        0x40000000              /* log all hypervisor exits */
 #define VM_CONFIG_LOG_DEBUGSERVER       0x80000000              /* log debug server protocol */
@@ -345,7 +345,24 @@ vm_result_t vm_mwrite(vm_t *instance,
     void *buffer, vm_count_t guest_address, vm_count_t *plength);
 
 /**
- * Reconfigure a VM instance.
+ * Get VM instance configuration item.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param config
+ *     The new configuration to use.
+ * @param mask
+ *     Specifies which configuration fields to get.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+VM_API
+vm_result_t vm_getconfig(vm_t *instance, vm_config_t *config, vm_count_t mask);
+
+/**
+ * Set VM instance configuration item.
  *
  * Reconfiguration is possible only if the instance has not been started.
  * Not all configuration fields can be updated.
@@ -363,7 +380,7 @@ vm_result_t vm_mwrite(vm_t *instance,
  *     VM_RESULT_SUCCESS or error code.
  */
 VM_API
-vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask);
+vm_result_t vm_setconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask);
 
 /**
  * Start a VM instance.

@@ -16,11 +16,6 @@
 #define PACKET_SIZE                     (16 * 1024)
 #define MBUF_SIZE                       ((PACKET_SIZE - 4) / 2)
 
-struct vm
-{
-    vm_config_t config;
-};
-
 struct vm_gdb_state
 {
     vm_t *instance;
@@ -232,9 +227,12 @@ exit:
 static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
 {
     vm_result_t result = VM_RESULT_SUCCESS;
+    vm_config_t config;
     vm_count_t address, length;
     char *p, *endp, *q, *endq;
     int ok;
+
+    vm_getconfig(state->instance, &config, ~0ULL);
 
     switch (packet[0])
     {
@@ -298,7 +296,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             if (0 >= ctid)
                 /* we can only continue ALL threads and we can only step ONE thread */
                 ctid = 1;
-            ok = ctid <= state->instance->config.vcpu_count;
+            ok = ctid <= config.vcpu_count;
             if (ok)
                 state->ctid = ctid;
         }
@@ -308,7 +306,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             if (0 >= gtid)
                 /* we can only get/set registers for ONE thread */
                 gtid = 1;
-            ok = gtid <= state->instance->config.vcpu_count;
+            ok = gtid <= config.vcpu_count;
             if (ok)
                 state->gtid = gtid;
         }
@@ -378,11 +376,11 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
         {
             if ('f' == packet[1])
                 state->next_tid = 1;
-            if (state->next_tid <= state->instance->config.vcpu_count)
+            if (state->next_tid <= config.vcpu_count)
             {
                 int last_tid = state->next_tid + 256;
-                if (last_tid > state->instance->config.vcpu_count)
-                    last_tid = (int)state->instance->config.vcpu_count;
+                if (last_tid > config.vcpu_count)
+                    last_tid = (int)config.vcpu_count;
                 p = state->obuf + 1;
                 for (int f = 1; last_tid >= state->next_tid; state->next_tid++, f = 0)
                 {
@@ -397,21 +395,21 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
         else
         if (0 == invariant_strncmp(packet + 1, "Offsets", sizeof "Offsets" - 1))
         {
-            if (0 == state->instance->config.exec_textseg)
+            if (0 == config.exec_textseg)
                 result = vm_gdb_sendf(state,
                     "Text=0;Data=0;Bss=0");
-            else if (0 == state->instance->config.exec_dataseg)
+            else if (0 == config.exec_dataseg)
                 result = vm_gdb_sendf(state,
                     "TextSeg=%08x%08x",
-                    (unsigned)(state->instance->config.exec_textseg >> 32) & 0xffffffffU,
-                    (unsigned)(state->instance->config.exec_textseg) & 0xffffffffU);
+                    (unsigned)(config.exec_textseg >> 32) & 0xffffffffU,
+                    (unsigned)(config.exec_textseg) & 0xffffffffU);
             else
                 result = vm_gdb_sendf(state,
                     "TextSeg=%08x%08x;DataSeg=%08x%08x",
-                    (unsigned)(state->instance->config.exec_textseg >> 32) & 0xffffffffU,
-                    (unsigned)(state->instance->config.exec_textseg) & 0xffffffffU,
-                    (unsigned)(state->instance->config.exec_dataseg >> 32) & 0xffffffffU,
-                    (unsigned)(state->instance->config.exec_dataseg) & 0xffffffffU);
+                    (unsigned)(config.exec_textseg >> 32) & 0xffffffffU,
+                    (unsigned)(config.exec_textseg) & 0xffffffffU,
+                    (unsigned)(config.exec_dataseg >> 32) & 0xffffffffU,
+                    (unsigned)(config.exec_dataseg) & 0xffffffffU);
         }
         else
         if (0 == invariant_strncmp(packet + 1, "Supported", sizeof "Supported" - 1))
@@ -465,7 +463,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
             if (0 >= tid)
                 /* we can only continue ALL threads and we can only step ONE thread */
                 tid = 1;
-            ok = tid <= state->instance->config.vcpu_count;
+            ok = tid <= config.vcpu_count;
         }
         result = vm_gdb_sendres(state, ok);
         break;
@@ -507,7 +505,7 @@ static vm_result_t vm_gdb_packet(struct vm_gdb_state *state, char *packet)
                     if (0 >= ctid)
                         /* we can only continue ALL threads and we can only step ONE thread */
                         ctid = 1;
-                    if (ctid > state->instance->config.vcpu_count)
+                    if (ctid > config.vcpu_count)
                         goto vCont_error;
                     vm_debug_step_range_t range = { .begin = address, .end = length };
                     length = sizeof range;

@@ -25,7 +25,7 @@
 
 struct vm
 {
-    vm_config_t config;                 /* must be first */
+    vm_config_t config;                 /* protected by thread_lock */
     int hv_fd;
     int vm_fd;
     int vcpu_run_size;
@@ -664,7 +664,26 @@ vm_result_t vm_mwrite(vm_t *instance,
 }
 
 VM_API
-vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask)
+vm_result_t vm_getconfig(vm_t *instance, vm_config_t *config, vm_count_t mask)
+{
+    pthread_mutex_lock(&instance->thread_lock);
+
+    if (~0ULL != mask)
+    {
+        for (vm_count_t index = 0; 0 != mask; mask >>= 1, index++)
+            if (mask & 1)
+                VM_CONFIG_FIELD(config, index) = VM_CONFIG_FIELD(&instance->config, index);
+    }
+    else
+        memcpy(config, &instance->config, sizeof *config);
+
+    pthread_mutex_unlock(&instance->thread_lock);
+
+    return VM_RESULT_SUCCESS;
+}
+
+VM_API
+vm_result_t vm_setconfig(vm_t *instance, const vm_config_t *config, vm_count_t mask)
 {
     vm_result_t result;
 
@@ -680,10 +699,14 @@ vm_result_t vm_reconfig(vm_t *instance, const vm_config_t *config, vm_count_t ma
         goto exit;
     }
 
-    mask &= VM_CONFIG_RECONFIG_MASK;
+    pthread_mutex_lock(&instance->thread_lock);
+
+    mask &= VM_CONFIG_SETCONFIG_MASK;
     for (vm_count_t index = 0; 0 != mask; mask >>= 1, index++)
         if (mask & 1)
             VM_CONFIG_FIELD(&instance->config, index) = VM_CONFIG_FIELD(config, index);
+
+    pthread_mutex_unlock(&instance->thread_lock);
 
     result = VM_RESULT_SUCCESS;
 

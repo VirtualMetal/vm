@@ -249,11 +249,6 @@ ARCH_PACK(struct e820_entry
     uint32_t type;
 });
 
-struct vm
-{
-    vm_config_t config;
-};
-
 static vm_result_t vm_plugin_linux_runcmd_c(vm_config_t *config,
     vm_runcmd_t *runcmd, char phase, const char *value);
 static vm_result_t vm_plugin_linux_runcmd_m(vm_t *instance,
@@ -386,6 +381,7 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
         .dsdt.header.revision = 2,
     };
     vm_result_t result;
+    vm_config_t config;
     vm_count_t guest_address, length;
     ARCH_PACK(struct
     {
@@ -393,6 +389,8 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
         struct acpi_wakeup wakeup;
         struct acpi_lapic lapic[VM_CONFIG_VCPU_COUNT_MAX];
     }) madt;
+
+    vm_getconfig(instance, &config, ~0ULL);
 
     /*
      * Setup fixed length tables in acpi_table.
@@ -427,14 +425,14 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
     madt.base.header.signature[2] = 'I';
     madt.base.header.signature[3] = 'C';
     madt.base.header.length = (uint32_t)(
-        (uint8_t *)&madt.lapic[instance->config.vcpu_count] - (uint8_t *)&madt.base);
+        (uint8_t *)&madt.lapic[config.vcpu_count] - (uint8_t *)&madt.base);
     madt.base.header.revision = 5;
     madt.base.lapic_address = 0xFEE00000;   /* !!!: REVISIT */
     madt.wakeup.type = 0x10;            /* multiprocessor wakeup */
     madt.wakeup.length = sizeof madt.wakeup;
     madt.wakeup.mailbox_version = 0;
     madt.wakeup.mailbox_address = VM_PLUGIN_LINUX_MAILBOX;
-    for (vm_count_t index = 0; instance->config.vcpu_count > index; index++)
+    for (vm_count_t index = 0; config.vcpu_count > index; index++)
     {
         madt.lapic[index].type = 0;     /* processor local apic */
         madt.lapic[index].length = sizeof madt.lapic[index];
@@ -443,7 +441,7 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
         madt.lapic[index].flags = 1;    /* processor enabled */
     }
     acpi_store_checksum_ex(
-        &madt.base, &madt.base.header.checksum, &madt.lapic[instance->config.vcpu_count]);
+        &madt.base, &madt.base.header.checksum, &madt.lapic[config.vcpu_count]);
 
     guest_address = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->madt;
     length = madt.base.header.length;
@@ -497,7 +495,7 @@ static vm_result_t vm_plugin_linux_setup_page_table(vm_t *instance)
 
     memset(&config, 0, sizeof config);
     config.page_table = VM_PLUGIN_LINUX_PAGE_TABLE;
-    vm_reconfig(instance, &config, VM_CONFIG_BIT(page_table));
+    vm_setconfig(instance, &config, VM_CONFIG_BIT(page_table));
 
     result = VM_RESULT_SUCCESS;
 
@@ -560,7 +558,7 @@ static vm_result_t vm_plugin_linux_setup_boot_params(vm_t *instance, vm_count_t 
     config.vcpu_args[1] = VM_PLUGIN_LINUX_BOOT_PARAMS;
     config.vcpu_table = VM_PLUGIN_LINUX_VCPU_TABLE;
     config.vcpu_mailbox = VM_PLUGIN_LINUX_MAILBOX;
-    vm_reconfig(instance, &config,
+    vm_setconfig(instance, &config,
         VM_CONFIG_BIT(vcpu_args[1]) | VM_CONFIG_BIT(vcpu_table) | VM_CONFIG_BIT(vcpu_mailbox));
 
     result = VM_RESULT_SUCCESS;
