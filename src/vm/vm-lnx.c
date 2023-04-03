@@ -141,6 +141,8 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
+static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+    int direction, vm_result_t result);
 static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static void vm_log_mmap(vm_t *instance);
@@ -209,6 +211,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    if (0 == instance->config.infi)
+        instance->config.infi = vm_default_infi;
     if (0 == instance->config.xmio)
         instance->config.xmio = vm_default_xmio;
     instance->config.vcpu_count = vcpu_count;
@@ -1219,7 +1223,7 @@ static void *vm_thread(void *instance0)
     int vcpu_fd = -1;
     struct kvm_run *vcpu_run = MAP_FAILED;
     pthread_t next_thread;
-    int is_first_thread, has_next_thread;
+    int is_first_thread, has_next_thread, has_infi;
     int is_terminated, has_debug_event, has_debug_log;
     int error;
 
@@ -1232,6 +1236,12 @@ static void *vm_thread(void *instance0)
     vcpu_index = (unsigned)(instance->config.vcpu_count - instance->thread_count);
     is_first_thread = instance->config.vcpu_count == instance->thread_count;
     has_next_thread = 0;
+    has_infi = 0;
+
+    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
+    if (!vm_result_check(result))
+        goto exit;
+    has_infi = 1;
 
     vcpu_fd = ioctl(instance->vm_fd, KVM_CREATE_VCPU, (void *)(uintptr_t)vcpu_index);
     if (-1 == vcpu_fd)
@@ -1412,6 +1422,9 @@ exit:
 
     if (is_first_thread)
         pthread_barrier_wait(&instance->barrier);
+
+    if (has_infi)
+        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
 
     return 0;
 }
@@ -2074,6 +2087,12 @@ static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
 
 exit:
     return result;
+}
+
+static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+    int direction, vm_result_t result)
+{
+    return VM_RESULT_SUCCESS;
 }
 
 static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,

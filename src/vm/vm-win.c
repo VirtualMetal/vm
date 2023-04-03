@@ -125,6 +125,8 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
+static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+    int direction, vm_result_t result);
 static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static HRESULT CALLBACK vm_emulator_pmio(
@@ -292,6 +294,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     memset(instance, 0, sizeof *instance);
     instance->config = *config;
+    if (0 == instance->config.infi)
+        instance->config.infi = vm_default_infi;
     if (0 == instance->config.xmio)
         instance->config.xmio = vm_default_xmio;
     instance->config.vcpu_count = vcpu_count;
@@ -1310,13 +1314,18 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     WHV_EMULATOR_STATUS emulator_status;
     struct vm_emulator_context emulator_context;
     UINT32 vcpu_index;
-    BOOL has_vcpu = FALSE;
+    BOOL has_infi = FALSE, has_vcpu = FALSE;
     BOOL is_terminated, has_debug_event, has_debug_log;
     HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
     HRESULT hresult;
 
     vcpu_index = (UINT32)(instance->config.vcpu_count - instance->thread_count);
+
+    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
+    if (!vm_result_check(result))
+        goto exit;
+    has_infi = TRUE;
 
     hresult = WHvEmulatorCreateEmulator(&emulator_callbacks, &emulator);
     if (FAILED(hresult))
@@ -1487,6 +1496,9 @@ exit:
 
     if (0 != emulator)
         WHvEmulatorDestroyEmulator(emulator);
+
+    if (has_infi)
+        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
 
     return 0;
 }
@@ -2227,6 +2239,12 @@ static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
 
 exit:
     return result;
+}
+
+static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+    int direction, vm_result_t result)
+{
+    return VM_RESULT_SUCCESS;
 }
 
 static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
