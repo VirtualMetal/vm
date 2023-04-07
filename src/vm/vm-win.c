@@ -339,6 +339,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     if (instance->config.passthrough || instance->config.vpic)
     {
+        instance->config.vpic = 1;
+
         lapic_mode = WHvX64LocalApicEmulationModeXApic;
         hresult = WHvSetPartitionProperty(instance->partition,
             WHvPartitionPropertyCodeLocalApicEmulationMode,
@@ -1844,7 +1846,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, UINT32 vcpu_index)
     REGSET(Cr4) = REGVAL(.Reg64 = 0x00000020);    /* PAE=1 */
     REGSET(Efer) = REGVAL(.Reg64 = 0x00000500);   /* LMA=1,LME=1 */
 
-    if (0 != vcpu_index && 0 != instance->config.vcpu_mailbox)
+    if (0 != vcpu_index && instance->config.vpic)
         /* make sure that VCPU is runnable regardless if it is a boot or application one */
         REGSETX(WHvRegisterInternalActivityState) = REGVAL(.InternalActivity = { 0 });
 

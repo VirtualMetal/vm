@@ -309,6 +309,8 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
 
     if (instance->config.passthrough || instance->config.vpic)
     {
+        instance->config.vpic = 1;
+
         if (-1 == ioctl(instance->vm_fd, KVM_CREATE_IRQCHIP, NULL))
         {
             result = vm_result(VM_ERROR_HYPERVISOR, errno);
@@ -1792,7 +1794,7 @@ static vm_result_t vm_vcpu_init(vm_t *instance, unsigned vcpu_index, int vcpu_fd
         goto exit;
     }
 
-    if (0 != vcpu_index && 0 != instance->config.vcpu_mailbox)
+    if (0 != vcpu_index && instance->config.vpic)
     {
         /* make sure that VCPU is runnable regardless if it is a boot or application one */
         mp_state.mp_state = KVM_MP_STATE_RUNNABLE;
