@@ -943,6 +943,50 @@ vm_result_t vm_terminate(vm_t *instance)
 }
 
 VM_API
+vm_result_t vm_interrupt(vm_t *instance,
+    vm_count_t vcpu_index, vm_count_t vector)
+{
+    vm_result_t result;
+    WHV_INTERRUPT_CONTROL interrupt_control;
+    HRESULT hresult;
+
+    AcquireSRWLockExclusive(&instance->thread_lock);
+
+    if (instance->config.vcpu_count <= vcpu_index)
+    {
+        result = vm_result(VM_ERROR_MISUSE, 0);
+        goto exit;
+    }
+
+    if (instance->is_terminated)
+    {
+        result = vm_result(VM_ERROR_TERMINATED, 0);
+        goto exit;
+    }
+
+    memset(&interrupt_control, 0, sizeof interrupt_control);
+    interrupt_control.Type = WHvX64InterruptTypeFixed;
+    interrupt_control.DestinationMode = WHvX64InterruptDestinationModeLogical;
+    interrupt_control.TriggerMode = WHvX64InterruptTriggerModeEdge;
+    interrupt_control.Destination = (UINT32)vcpu_index;
+    interrupt_control.Vector = (UINT32)vector;
+
+    hresult = WHvRequestInterrupt(instance->partition, &interrupt_control, sizeof interrupt_control);
+    if (FAILED(hresult))
+    {
+        result = vm_result(VM_ERROR_VCPU, hresult);
+        goto exit;
+    }
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    ReleaseSRWLockExclusive(&instance->thread_lock);
+
+    return result;
+}
+
+VM_API
 vm_result_t vm_debug(vm_t *instance,
     vm_count_t control, vm_count_t vcpu_index, vm_count_t address,
     void *buffer, vm_count_t *plength)

@@ -432,6 +432,24 @@ vm_result_t vm_wait(vm_t *instance);
 VM_API
 vm_result_t vm_terminate(vm_t *instance);
 
+/**
+ * Interrupt a VCPU.
+ *
+ * This function is thread-safe if instance remains valid during the call.
+ *
+ * @param instance
+ *     The VM instance.
+ * @param vcpu_index
+ *     The virtual CPU index.
+ * @param vector
+ *     The interrupt vector.
+ * @return
+ *     VM_RESULT_SUCCESS or error code.
+ */
+VM_API
+vm_result_t vm_interrupt(vm_t *instance,
+    vm_count_t vcpu_index, vm_count_t vector);
+
 #define VM_DEBUG_ATTACH                 ((vm_count_t)'A')   /**< attach debugger to VM instance */
 #define VM_DEBUG_DETACH                 ((vm_count_t)'D')   /**< detach debugger from VM instance */
 #define VM_DEBUG_SETEVENTS              ((vm_count_t)'E')   /**< set debug events handler */
