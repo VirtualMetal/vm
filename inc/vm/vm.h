@@ -80,7 +80,7 @@ struct vm_config
 {
     /* interface */
     vm_result_t (*infi)(void *user_context, vm_count_t vcpu_index,
-        int direction, vm_result_t result);
+        int dir, vm_result_t result);
     vm_result_t (*xmio)(void *user_context, vm_count_t vcpu_index,
         vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
     void (*logf)(const char *format, ...);

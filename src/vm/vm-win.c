@@ -126,7 +126,7 @@ static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
 static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
-    int direction, vm_result_t result);
+    int dir, vm_result_t result);
 static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static HRESULT CALLBACK vm_emulator_pmio(
@@ -1383,7 +1383,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     WHV_EMULATOR_STATUS emulator_status;
     struct vm_emulator_context emulator_context;
     UINT32 vcpu_index;
-    BOOL has_infi = FALSE, has_vcpu = FALSE;
+    BOOL has_infi_all = FALSE, has_vcpu = FALSE, has_infi = FALSE;
     BOOL is_terminated, has_debug_event, has_debug_log;
     HANDLE next_thread = 0;
     WHV_RUN_VP_EXIT_CONTEXT exit_context;
@@ -1391,10 +1391,13 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     vcpu_index = (UINT32)(instance->config.vcpu_count - instance->thread_count);
 
-    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
-    if (!vm_result_check(result))
-        goto exit;
-    has_infi = TRUE;
+    if (0 == vcpu_index)
+    {
+        result = instance->config.infi(instance->config.user_context, ~0ULL, +1, VM_RESULT_SUCCESS);
+        if (!vm_result_check(result))
+            goto exit;
+        has_infi_all = TRUE;
+    }
 
     hresult = WHvEmulatorCreateEmulator(&emulator_callbacks, &emulator);
     if (FAILED(hresult))
@@ -1448,6 +1451,11 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     has_debug_log = !!instance->config.logf &&
         0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
+
+    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
+    if (!vm_result_check(result))
+        goto exit;
+    has_infi = TRUE;
 
     for (;;)
     {
@@ -1543,6 +1551,9 @@ exit:
     if (!vm_result_check(result))
         InterlockedCompareExchange64(&instance->thread_result, result, VM_RESULT_SUCCESS);
 
+    if (has_infi)
+        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
+
     AcquireSRWLockExclusive(&instance->thread_lock);
     instance->is_terminated = 1;
     WHvCancelRunVirtualProcessor(instance->partition, (vcpu_index + 1) % instance->config.vcpu_count, 0);
@@ -1566,8 +1577,12 @@ exit:
     if (0 != emulator)
         WHvEmulatorDestroyEmulator(emulator);
 
-    if (has_infi)
-        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
+    if (0 == vcpu_index)
+    {
+        if (has_infi_all)
+            instance->config.infi(instance->config.user_context, ~0ULL, -1,
+                InterlockedCompareExchange64(&instance->thread_result, ~0LL, ~0LL));
+    }
 
     return 0;
 }
@@ -2311,7 +2326,7 @@ exit:
 }
 
 static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
-    int direction, vm_result_t result)
+    int dir, vm_result_t result)
 {
     return VM_RESULT_SUCCESS;
 }

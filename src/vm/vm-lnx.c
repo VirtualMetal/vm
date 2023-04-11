@@ -142,7 +142,7 @@ static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm
 static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
 static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
-    int direction, vm_result_t result);
+    int dir, vm_result_t result);
 static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static void vm_log_mmap(vm_t *instance);
@@ -1289,7 +1289,7 @@ static void *vm_thread(void *instance0)
     int vcpu_fd = -1;
     struct kvm_run *vcpu_run = MAP_FAILED;
     pthread_t next_thread;
-    int is_first_thread, has_next_thread, has_infi;
+    int is_first_thread, has_next_thread, has_infi_all, has_infi;
     int is_terminated, has_debug_event, has_debug_log;
     int error;
 
@@ -1302,12 +1302,16 @@ static void *vm_thread(void *instance0)
     vcpu_index = (unsigned)(instance->config.vcpu_count - instance->thread_count);
     is_first_thread = instance->config.vcpu_count == instance->thread_count;
     has_next_thread = 0;
+    has_infi_all = 0;
     has_infi = 0;
 
-    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
-    if (!vm_result_check(result))
-        goto exit;
-    has_infi = 1;
+    if (0 == vcpu_index)
+    {
+        result = instance->config.infi(instance->config.user_context, ~0ULL, +1, VM_RESULT_SUCCESS);
+        if (!vm_result_check(result))
+            goto exit;
+        has_infi_all = 1;
+    }
 
     vcpu_fd = ioctl(instance->vm_fd, KVM_CREATE_VCPU, (void *)(uintptr_t)vcpu_index);
     if (-1 == vcpu_fd)
@@ -1363,6 +1367,11 @@ static void *vm_thread(void *instance0)
 
     has_debug_log = !!instance->config.logf &&
         0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
+
+    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
+    if (!vm_result_check(result))
+        goto exit;
+    has_infi = 1;
 
     /* we are now able to accept cancellation signals */
     pthread_sigmask(SIG_SETMASK, &newset, 0);
@@ -1455,6 +1464,9 @@ exit:
         atomic_compare_exchange_strong(&instance->thread_result, &expected, result);
     }
 
+    if (has_infi)
+        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
+
     pthread_mutex_lock(&instance->thread_lock);
     instance->is_terminated = 1;
     if (has_next_thread)
@@ -1486,11 +1498,15 @@ exit:
     if (-1 != vcpu_fd)
         close(vcpu_fd);
 
+    if (0 == vcpu_index)
+    {
+        if (has_infi_all)
+            instance->config.infi(instance->config.user_context, ~0ULL, -1,
+                atomic_load(&instance->thread_result));
+    }
+
     if (is_first_thread)
         pthread_barrier_wait(&instance->barrier);
-
-    if (has_infi)
-        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
 
     return 0;
 }
@@ -2156,7 +2172,7 @@ exit:
 }
 
 static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
-    int direction, vm_result_t result)
+    int dir, vm_result_t result)
 {
     return VM_RESULT_SUCCESS;
 }

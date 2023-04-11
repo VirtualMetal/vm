@@ -344,6 +344,93 @@ static void vm_run_terminate_test(void)
     ASSERT(vm_result_check(result));
 }
 
+struct vm_run_infi_test_data
+{
+    vm_count_t all_total, all_count;
+    vm_count_t cpu_total, cpu_count;
+};
+static vm_result_t vm_run_infi_test_infi(void *user_context, vm_count_t vcpu_index,
+    int dir, vm_result_t result)
+{
+    struct vm_run_infi_test_data *data = user_context;
+
+    if (~0ULL == vcpu_index)
+    {
+#if defined(_WIN64)
+        InterlockedIncrement64(&data->all_total);
+        InterlockedAdd64(&data->all_count, dir);
+#else
+        atomic_fetch_add(&data->all_total, 1);
+        atomic_fetch_add(&data->all_count, dir);
+#endif
+    }
+    else
+    {
+#if defined(_WIN64)
+        InterlockedIncrement64(&data->cpu_total);
+        InterlockedAdd64(&data->cpu_count, dir);
+#else
+        atomic_fetch_add(&data->cpu_total, 1);
+        atomic_fetch_add(&data->cpu_count, dir);
+#endif
+    }
+
+    return VM_RESULT_SUCCESS;
+}
+static void vm_run_infi_test(void)
+{
+    vm_result_t result;
+    vm_config_t config;
+    char *tconfigv[] =
+    {
+        "mmap=0,0x10000",
+        "pg0=0x1000",
+        "pg1=0x2003",
+        "pg2=0x0083,512",
+        "vcpu_table=0x3000,1",
+        "vcpu_entry=0x0000",
+        "data=0,2,0xeb,0xfe",           /* jmp 0 */
+        0,
+    };
+    vm_t *instance;
+    struct vm_run_infi_test_data data = { 0 };
+
+    memset(&config, 0, sizeof config);
+    config.vcpu_count = 2;
+
+    config.infi = vm_run_infi_test_infi;
+    config.user_context = &data;
+
+    result = vm_run(&config, tconfigv, &instance);
+    ASSERT(vm_result_check(result));
+
+#if defined(_WIN64)
+    Sleep(300);
+#else
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 300000000;
+    nanosleep(&ts, 0);
+#endif
+
+    result = vm_terminate(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_wait(instance);
+    ASSERT(vm_result_check(result));
+
+    result = vm_getconfig(instance, &config, VM_CONFIG_BIT(vcpu_count));
+    ASSERT(vm_result_check(result));
+
+    ASSERT(2 == data.all_total);
+    ASSERT(0 == data.all_count);
+    ASSERT(config.vcpu_count * 2 == data.cpu_total);
+    ASSERT(0 == data.cpu_count);
+
+    result = vm_delete(instance);
+    ASSERT(vm_result_check(result));
+}
+
 void run_tests(void)
 {
     TEST(vm_create_delete_test);
@@ -354,4 +441,5 @@ void run_tests(void)
     TEST(vm_run_error_test);
     TEST(vm_run_halt_test);
     TEST(vm_run_terminate_test);
+    TEST(vm_run_infi_test);
 }
