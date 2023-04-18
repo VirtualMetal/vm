@@ -382,42 +382,42 @@ int vsprintf_1024(char *buf, const char *fmt, va_list ap)
 #endif
 
 /*
- * bitmaps
+ * bitsets
  */
 
-typedef unsigned long long bmap_t;
+typedef unsigned long long bset_t;
 
-#define bmap_declcount(capacity)        (((capacity) + bmap__mask__() - 1) >> bmap__shift__())
-#define bmap_capacity(bmap)             (sizeof(bmap) << 3)
-#define bmap__shift__()                 (6)
-#define bmap__mask__()                  (0x3f)
+#define bset_declcount(capacity)        (((capacity) + bset__mask__() - 1) >> bset__shift__())
+#define bset_capacity(bset)             (sizeof(bset) << 3)
+#define bset__shift__()                 (6)
+#define bset__mask__()                  (0x3f)
 
 static inline
-unsigned bmap_get(bmap_t *bmap, unsigned pos)
+unsigned bset_get(bset_t *bset, unsigned pos)
 {
 #if defined(_MSC_VER)
-    return _bittest64(&bmap[pos >> bmap__shift__()], pos & bmap__mask__());
+    return _bittest64(&bset[pos >> bset__shift__()], pos & bset__mask__());
 #elif defined(__GNUC__)
-    return !!(bmap[pos >> bmap__shift__()] & ((bmap_t)1 << (pos & bmap__mask__())));
+    return !!(bset[pos >> bset__shift__()] & ((bset_t)1 << (pos & bset__mask__())));
 #endif
 }
 
 static inline
-void bmap_set(bmap_t *bmap, unsigned pos, unsigned val)
+void bset_set(bset_t *bset, unsigned pos, unsigned val)
 {
     if (val)
-        bmap[pos >> bmap__shift__()] |= ((bmap_t)1 << (pos & bmap__mask__()));
+        bset[pos >> bset__shift__()] |= ((bset_t)1 << (pos & bset__mask__()));
     else
-        bmap[pos >> bmap__shift__()] &= ~((bmap_t)1 << (pos & bmap__mask__()));
+        bset[pos >> bset__shift__()] &= ~((bset_t)1 << (pos & bset__mask__()));
 }
 
 static inline
-unsigned bmap_popcount(bmap_t *bmap, unsigned capacity)
+unsigned bset_popcount(bset_t *bset, unsigned capacity)
 {
     unsigned res = 0;
-    for (unsigned pos = 0, cnt = bmap_declcount(capacity); cnt > pos; pos++)
+    for (unsigned pos = 0, cnt = bset_declcount(capacity); cnt > pos; pos++)
     {
-        bmap_t bval = bmap[pos];
+        bset_t bval = bset[pos];
 #if defined(_MSC_VER)
         res += (unsigned)__popcnt64(bval);
 #elif defined(__GNUC__)
@@ -428,18 +428,18 @@ unsigned bmap_popcount(bmap_t *bmap, unsigned capacity)
 }
 
 static inline
-unsigned bmap_find(bmap_t *bmap, unsigned capacity, unsigned val)
+unsigned bset_find(bset_t *bset, unsigned capacity, unsigned val)
 {
-    for (unsigned idx = 0, cnt = bmap_declcount(capacity); cnt > idx; idx++)
+    for (unsigned idx = 0, cnt = bset_declcount(capacity); cnt > idx; idx++)
     {
-        bmap_t bval = val ? bmap[idx] : ~bmap[idx];
+        bset_t bval = val ? bset[idx] : ~bset[idx];
         unsigned bpos;
 #if defined(_MSC_VER)
         if (_BitScanForward64(&bpos, bval))
-            return (idx << bmap__shift__()) | bpos;
+            return (idx << bset__shift__()) | bpos;
 #elif defined(__GNUC__)
         if (0 != (bpos = (unsigned)__builtin_ffsll((long long)bval)))
-            return (idx << bmap__shift__()) | (bpos - 1);
+            return (idx << bset__shift__()) | (bpos - 1);
 #endif
     }
     return ~0U;

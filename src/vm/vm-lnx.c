@@ -31,7 +31,7 @@ struct vm
     int vcpu_run_size;
     pthread_mutex_t mmap_lock;
     list_link_t mmap_list;              /* protected by mmap_lock */
-    bmap_t slot_bmap[bmap_declcount(1024)];     /* ditto */
+    bset_t slot_set[bset_declcount(1024)];      /* ditto */
     pthread_mutex_t vm_start_lock;      /* vm_start/vm_wait serialization lock */
     unsigned
         has_vm_start:1,                 /* protected by vm_start_lock */
@@ -428,11 +428,11 @@ vm_result_t vm_mmap(vm_t *instance,
     map->guest_address = guest_address;
 
     pthread_mutex_lock(&instance->mmap_lock);
-    map->slot = bmap_find(instance->slot_bmap, bmap_capacity(instance->slot_bmap), 0);
-    if (map->slot < bmap_capacity(instance->slot_bmap))
+    map->slot = bset_find(instance->slot_set, bset_capacity(instance->slot_set), 0);
+    if (map->slot < bset_capacity(instance->slot_set))
     {
         map->has_slot = 1;
-        bmap_set(instance->slot_bmap, map->slot, 1);
+        bset_set(instance->slot_set, map->slot, 1);
     }
     pthread_mutex_unlock(&instance->mmap_lock);
     if (!map->has_slot)
@@ -563,7 +563,7 @@ vm_result_t vm_munmap(vm_t *instance, vm_mmap_t *map)
     if (map->has_slot)
     {
         pthread_mutex_lock(&instance->mmap_lock);
-        bmap_set(instance->slot_bmap, map->slot, 0);
+        bset_set(instance->slot_set, map->slot, 0);
         pthread_mutex_unlock(&instance->mmap_lock);
     }
 

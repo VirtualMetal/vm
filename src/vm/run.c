@@ -14,7 +14,7 @@
 #include <vm/internal.h>
 
 static vm_result_t vm_runcmd_dispatch(void *context, vm_runcmd_t *runcmds,
-    char phase, bmap_t *valid, unsigned index, char *p);
+    char phase, bset_t *valid_set, unsigned index, char *p);
 
 VM_API
 vm_result_t vm_run(const vm_config_t *default_config, char **tconfigv, vm_t **pinstance)
@@ -29,13 +29,13 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
     /* command/command-with-index macros */
 #define CMD(S)\
     (0 == invariant_strncmp(p, S, sizeof S - 1) && \
-    (('=' == p[sizeof S - 1] && (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p += sizeof S)) || \
-    ('\0' == p[sizeof S - 1] && (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p = "1"))))
+    (('=' == p[sizeof S - 1] && (bset_set(valid_set, (unsigned)(pp - tconfigv), 1), p += sizeof S)) || \
+    ('\0' == p[sizeof S - 1] && (bset_set(valid_set, (unsigned)(pp - tconfigv), 1), p = "1"))))
 #define CMI(S,L,U)\
     (0 == invariant_strncmp(p, S, sizeof S - 1) && \
     (cmi = (unsigned)strtoullint(p + sizeof S - 1, &cmip, +10), '=' == *cmip) && \
     (L) <= cmi && cmi <= (U) && \
-    (bmap_set(valid, (unsigned)(pp - tconfigv), 1), p = cmip + 1))
+    (bset_set(valid_set, (unsigned)(pp - tconfigv), 1), p = cmip + 1))
     /* check macro */
 #define CHK(C)  do \
     if (C) ; else { result = vm_result(VM_ERROR_CONFIG, pp - tconfigv + 1); goto exit; } \
@@ -48,7 +48,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
     vm_config_t config;
     int tconfigc;
     unsigned invalid_index;
-    bmap_t valid[bmap_declcount(4096)];
+    bset_t valid_set[bset_declcount(4096)];
     vm_t *instance = 0;
     vm_count_t guest_address, length, count, stride, page_address;
     vm_mmap_t *map;
@@ -62,19 +62,19 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
 
     config = *default_config;
 
-    memset(valid, 0, sizeof valid);
+    memset(valid_set, 0, sizeof valid_set);
 
     tconfigc = 0;
     for (char **pp = tconfigv, *p = *pp; p; p = *++pp)
     {
         tconfigc++;
-        if (bmap_capacity(valid) < tconfigc)
+        if (bset_capacity(valid_set) < tconfigc)
         {
             result = vm_result(VM_ERROR_CONFIG, 0);
             goto exit;
         }
         if ('#' == *p || '\0' == *p)
-            bmap_set(valid, (unsigned)(pp - tconfigv), 1);
+            bset_set(valid_set, (unsigned)(pp - tconfigv), 1);
     }
 
     /*
@@ -147,7 +147,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
         else
         {
             result = vm_runcmd_dispatch(&config, runcmds,
-                VM_RUNCMD_PHASE_CREATE, valid, (unsigned)(pp - tconfigv), p);
+                VM_RUNCMD_PHASE_CREATE, valid_set, (unsigned)(pp - tconfigv), p);
             if (!vm_result_check(result))
                 goto exit;
         }
@@ -215,7 +215,7 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
         else
         {
             result = vm_runcmd_dispatch(instance, runcmds,
-                VM_RUNCMD_PHASE_MEMORY, valid, (unsigned)(pp - tconfigv), p);
+                VM_RUNCMD_PHASE_MEMORY, valid_set, (unsigned)(pp - tconfigv), p);
             if (!vm_result_check(result))
                 goto exit;
         }
@@ -393,13 +393,13 @@ vm_result_t vm_run_ex(const vm_config_t *default_config, char **tconfigv, vm_run
         else
         {
             result = vm_runcmd_dispatch(instance, runcmds,
-                VM_RUNCMD_PHASE_START, valid, (unsigned)(pp - tconfigv), p);
+                VM_RUNCMD_PHASE_START, valid_set, (unsigned)(pp - tconfigv), p);
             if (!vm_result_check(result))
                 goto exit;
         }
     }
 
-    invalid_index = bmap_find(valid, bmap_capacity(valid), 0);
+    invalid_index = bset_find(valid_set, bset_capacity(valid_set), 0);
     if (invalid_index < (unsigned)tconfigc)
     {
         result = vm_result(VM_ERROR_CONFIG, invalid_index + 1);
@@ -451,7 +451,7 @@ exit:
 }
 
 static vm_result_t vm_runcmd_dispatch(void *context, vm_runcmd_t *runcmds,
-    char phase, bmap_t *valid, unsigned index, char *p)
+    char phase, bset_t *valid_set, unsigned index, char *p)
 {
     vm_result_t result = VM_RESULT_SUCCESS;
     for (vm_runcmd_t *runcmd = runcmds; runcmd && runcmd->name; runcmd++)
@@ -459,8 +459,8 @@ static vm_result_t vm_runcmd_dispatch(void *context, vm_runcmd_t *runcmds,
         {
             size_t len = strlen(runcmd->name + 1);
             if ((0 == invariant_strncmp(p, runcmd->name + 1, len)) &&
-                (('=' == p[len] && (bmap_set(valid, index, 1), p += len + 1)) ||
-                ('\0' == p[len] && (bmap_set(valid, index, 1), p = "1"))))
+                (('=' == p[len] && (bset_set(valid_set, index, 1), p += len + 1)) ||
+                ('\0' == p[len] && (bset_set(valid_set, index, 1), p = "1"))))
             {
                 result = runcmd->fn(context, runcmd, phase, p);
                 if (VM_ERROR_CONFIG == vm_result_error(result))
