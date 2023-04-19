@@ -1,7 +1,7 @@
 Tags = ["test"]
 
 Include = [
-    "../../../inc/vm/vm.h",
+    "../../../inc/**/*.h",
     "../../../tst/tlib/*.h",
     "../../../tst/vm-tests/*.h",
 ]

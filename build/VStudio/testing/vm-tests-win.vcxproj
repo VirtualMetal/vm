@@ -59,6 +59,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\inc\vm\vm.h" />
+    <ClInclude Include="..\..\..\inc\xp\platform.h" />
+    <ClInclude Include="..\..\..\inc\xp\utility.h" />
+    <ClInclude Include="..\..\..\inc\xp\xp.h" />
     <ClInclude Include="..\..\..\tst\tlib\testsuite.h" />
     <ClInclude Include="..\..\..\tst\vm-tests\vm-tests.h" />
   </ItemGroup>

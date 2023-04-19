@@ -1,5 +1,8 @@
 Include = \
 	../../inc/vm/vm.h \
+	../../inc/xp/platform.h \
+	../../inc/xp/utility.h \
+	../../inc/xp/xp.h \
 	../../src/arch/arch.h \
 	../../src/arch/x64.h \
 	../../src/vm/internal.h

@@ -1,5 +1,8 @@
 Include = \
 	../../../inc/vm/vm.h \
+	../../../inc/xp/platform.h \
+	../../../inc/xp/utility.h \
+	../../../inc/xp/xp.h \
 	../../../tst/vmlinux/plugin.h
 Compile = \
 	../../../tst/vmlinux/linux.c \

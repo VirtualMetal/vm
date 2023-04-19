@@ -65,6 +65,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\inc\vm\vm.h" />
+    <ClInclude Include="..\..\..\inc\xp\platform.h" />
+    <ClInclude Include="..\..\..\inc\xp\utility.h" />
+    <ClInclude Include="..\..\..\inc\xp\xp.h" />
     <ClInclude Include="..\..\..\tst\vmlinux\plugin.h" />
   </ItemGroup>
   <ItemGroup>

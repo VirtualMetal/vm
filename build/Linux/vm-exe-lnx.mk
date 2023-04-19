@@ -1,5 +1,8 @@
 Include = \
 	../../inc/vm/vm.h \
+	../../inc/xp/platform.h \
+	../../inc/xp/utility.h \
+	../../inc/xp/xp.h \
 	../../src/vm/internal.h
 Compile = \
 	../../src/vm/program.c

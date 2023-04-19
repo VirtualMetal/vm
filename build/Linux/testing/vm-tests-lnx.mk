@@ -1,5 +1,8 @@
 Include = \
 	../../../inc/vm/vm.h \
+	../../../inc/xp/platform.h \
+	../../../inc/xp/utility.h \
+	../../../inc/xp/xp.h \
 	../../../tst/tlib/testsuite.h \
 	../../../tst/vm-tests/vm-tests.h
 Compile = \
