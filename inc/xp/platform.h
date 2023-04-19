@@ -238,21 +238,78 @@ typedef struct pthread_attr pthread_attr_t;
 
 static inline
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-    void *(*start_routine) (void *), void *arg)
+    void *(*start_routine)(void *), void *arg)
 {
-    return 0;
+    /*
+     * On Win64 the __stdcall and __cdecl calling conventions are the same.
+     * This allows us to safely cast the start_routine to PTHREAD_START_ROUTINE.
+     * There is a mismatch on the return type of start_routine (void *) and
+     * PTHREAD_START_ROUTINE (DWORD). However a DWORD fits in a void *, so
+     * I am going to ignore this! Just don't return a full void * from start_routine
+     * and expect it to work.
+     */
+    *thread = CreateThread(0, 0, (PTHREAD_START_ROUTINE)start_routine, arg, 0, 0);
+    return *thread ? 0 : GetLastError();
 }
 
 static inline
 int pthread_join(pthread_t thread, void **retval)
 {
+    DWORD ExitCode;
+    WaitForSingleObject(thread, INFINITE);
+    if (0 != retval)
+    {
+        GetExitCodeThread(thread, &ExitCode);
+        *(PDWORD)retval = ExitCode;
+    }
+    CloseHandle(thread);
     return 0;
 }
 
 static inline
 int pthread_detach(pthread_t thread)
 {
+    CloseHandle(thread);
     return 0;
+}
+
+/*
+ * POSIX-like synchronization
+ */
+
+typedef SRWLOCK pthread_mutex_t;
+typedef struct pthread_mutexattr pthread_mutexattr_t;
+
+#define PTHREAD_MUTEX_INITIALIZER       SRWLOCK_INIT
+
+static inline
+int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
+{
+    return InitializeSRWLock(mutex), 0;
+}
+
+static inline
+int pthread_mutex_destroy(pthread_mutex_t *mutex)
+{
+    return 0;
+}
+
+static inline
+int pthread_mutex_lock(pthread_mutex_t *mutex)
+{
+    return AcquireSRWLockExclusive(mutex), 0;
+}
+
+static inline
+int pthread_mutex_trylock(pthread_mutex_t *mutex)
+{
+    return TryAcquireSRWLockExclusive(mutex) ? 0 : ERROR_BUSY;
+}
+
+static inline
+int pthread_mutex_unlock(pthread_mutex_t *mutex)
+{
+    return ReleaseSRWLockExclusive(mutex), 0;
 }
 
 /*
