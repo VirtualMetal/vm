@@ -248,7 +248,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
      * I am going to ignore this! Just don't return a full void * from start_routine
      * and expect it to work.
      */
+#if !defined(_INC_PROCESS)
     *thread = CreateThread(0, 0, (PTHREAD_START_ROUTINE)start_routine, arg, 0, 0);
+#else
+    *thread = (HANDLE)_beginthreadex(0, 0, (PTHREAD_START_ROUTINE)start_routine, arg, 0, 0);
+#endif
     return *thread ? 0 : GetLastError();
 }
 
@@ -271,6 +275,16 @@ int pthread_detach(pthread_t thread)
 {
     CloseHandle(thread);
     return 0;
+}
+
+static inline
+void pthread_exit(void *retval)
+{
+#if !defined(_INC_PROCESS)
+    ExitThread((DWORD)(UINT_PTR)retval);
+#else
+    _endthreadex((DWORD)(UINT_PTR)retval);
+#endif
 }
 
 /*
