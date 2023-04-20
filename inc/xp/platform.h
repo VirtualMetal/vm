@@ -293,7 +293,6 @@ void pthread_exit(void *retval)
 
 typedef SRWLOCK pthread_mutex_t;
 typedef struct pthread_mutexattr pthread_mutexattr_t;
-
 #define PTHREAD_MUTEX_INITIALIZER       SRWLOCK_INIT
 
 static inline
@@ -324,6 +323,40 @@ static inline
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
     return ReleaseSRWLockExclusive(mutex), 0;
+}
+
+typedef CONDITION_VARIABLE pthread_cond_t;
+typedef struct pthread_condattr pthread_condattr_t;
+#define PTHREAD_COND_INITIALIZER        CONDITION_VARIABLE_INIT
+
+static inline
+int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr)
+{
+    return InitializeConditionVariable(cond), 0;
+}
+
+static inline
+int pthread_cond_destroy(pthread_cond_t *cond)
+{
+    return 0;
+}
+
+static inline
+int pthread_cond_signal(pthread_cond_t *cond)
+{
+    return WakeConditionVariable(cond), 0;
+}
+
+static inline
+int pthread_cond_broadcast(pthread_cond_t *cond)
+{
+    return WakeAllConditionVariable(cond), 0;
+}
+
+static inline
+int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
+{
+    return SleepConditionVariableSRW(cond, mutex, INFINITE, 0);
 }
 
 /*
