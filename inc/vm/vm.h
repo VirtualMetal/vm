@@ -79,23 +79,23 @@ typedef unsigned long long vm_count_t;
 struct vm_config
 {
     /* interface */
-    vm_result_t (*infi)(void *user_context, vm_count_t vcpu_index,
+    vm_result_t (*infi)(vm_t *instance, vm_count_t vcpu_index,
         int dir, vm_result_t result);
-    vm_result_t (*xmio)(void *user_context, vm_count_t vcpu_index,
+    vm_result_t (*xmio)(vm_t *instance, vm_count_t vcpu_index,
         vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
     void (*logf)(const char *format, ...);
     vm_count_t reserved0[13];
 
     /* immutable */
-    void *user_context;
     vm_count_t log_flags;
     vm_count_t compat_flags;
     vm_count_t vcpu_count;              /* number of virtual cpu's */
-    vm_count_t reserved1[11];
+    vm_count_t reserved1[12];
     vm_count_t passthrough:1;           /* pass through native hypervisor features */
     vm_count_t vpic:1;                  /* virtual PIC support */
 
     /* reconfigurable */
+    void *user_context;
     vm_count_t vcpu_entry;              /* virtual cpu entry point */
     vm_count_t vcpu_args[6];            /* virtual cpu entry args */
     vm_count_t vcpu_table;              /* virtual cpu table address / stride (GDT+stack on x64) */
@@ -104,7 +104,7 @@ struct vm_config
     vm_count_t page_table;              /* page table address */
     vm_count_t exec_textseg;            /* executable file text segment address */
     vm_count_t exec_dataseg;            /* executable file data segment address */
-    vm_count_t reserved2[19];
+    vm_count_t reserved2[18];
 };
 VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 
@@ -194,6 +194,17 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance);
  */
 VM_API
 vm_result_t vm_delete(vm_t *instance);
+
+/**
+ * Get address of user context associated with the instance.
+ *
+ * @param instance
+ *     The VM instance.
+ * @return
+ *     Pointer to location that contains the user context associated with the instance.
+ */
+VM_API
+void **vm_context(vm_t *instance);
 
 /**
  * Map anonymous or file backed host memory to guest memory.

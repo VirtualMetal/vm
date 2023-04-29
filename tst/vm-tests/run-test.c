@@ -349,10 +349,10 @@ struct vm_run_infi_test_data
     vm_count_t all_total, all_count;
     vm_count_t cpu_total, cpu_count;
 };
-static vm_result_t vm_run_infi_test_infi(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_run_infi_test_infi(vm_t *instance, vm_count_t vcpu_index,
     int dir, vm_result_t result)
 {
-    struct vm_run_infi_test_data *data = user_context;
+    struct vm_run_infi_test_data *data = *vm_context(instance);
 
     if (~0ULL == vcpu_index)
     {

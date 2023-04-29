@@ -214,13 +214,25 @@ ssize_t pwrite(int fd, const void *buf, size_t nbyte, off_t offset)
 static inline
 ssize_t read(int fd, void *buf, size_t nbyte)
 {
-    return pread(fd, buf, nbyte, -1LL);
+    HANDLE h = (HANDLE)(UINT_PTR)fd;
+    DWORD BytesTransferred;
+    if (!ReadFile(h, buf, (DWORD)nbyte, &BytesTransferred, 0))
+    {
+        if (ERROR_HANDLE_EOF == GetLastError())
+            return 0;
+        return -1;
+    }
+    return BytesTransferred;
 }
 
 static inline
 ssize_t write(int fd, const void *buf, size_t nbyte)
 {
-    return pwrite(fd, buf, nbyte, -1LL);
+    HANDLE h = (HANDLE)(UINT_PTR)fd;
+    DWORD BytesTransferred;
+    if (!WriteFile(h, buf, (DWORD)nbyte, &BytesTransferred, 0))
+        return -1;
+    return BytesTransferred;
 }
 
 static inline
@@ -462,11 +474,13 @@ inline BOOL WINAPI _DllMainCRTStartup(HINSTANCE Instance, DWORD Reason, PVOID Re
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <termios.h>
 #include <unistd.h>
 
 /*

@@ -141,9 +141,9 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, int vcpu_fd, void *buffer, vm
 static vm_result_t vm_vcpu_setregs(vm_t *instance, int vcpu_fd, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, int vcpu_fd,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
-static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_infi(vm_t *instance, vm_count_t vcpu_index,
     int dir, vm_result_t result);
-static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static void vm_log_mmap(vm_t *instance);
 static void vm_log_vcpu_cancel(vm_t *instance,
@@ -382,6 +382,12 @@ vm_result_t vm_delete(vm_t *instance)
     free(instance);
 
     return VM_RESULT_SUCCESS;
+}
+
+VM_API
+void **vm_context(vm_t *instance)
+{
+    return &instance->config.user_context;
 }
 
 VM_API
@@ -1307,7 +1313,7 @@ static void *vm_thread(void *instance0)
 
     if (0 == vcpu_index)
     {
-        result = instance->config.infi(instance->config.user_context, ~0ULL, +1, VM_RESULT_SUCCESS);
+        result = instance->config.infi(instance, ~0ULL, +1, VM_RESULT_SUCCESS);
         if (!vm_result_check(result))
             goto exit;
         has_infi_all = 1;
@@ -1368,7 +1374,7 @@ static void *vm_thread(void *instance0)
     has_debug_log = !!instance->config.logf &&
         0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
 
-    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
+    result = instance->config.infi(instance, vcpu_index, +1, VM_RESULT_SUCCESS);
     if (!vm_result_check(result))
         goto exit;
     has_infi = 1;
@@ -1421,7 +1427,7 @@ static void *vm_thread(void *instance0)
         case KVM_EXIT_IO:
             for (__u32 index = 0; vcpu_run->io.count > index; index++)
             {
-                result = instance->config.xmio(instance->config.user_context, vcpu_index,
+                result = instance->config.xmio(instance, vcpu_index,
                     VM_XMIO_PMIO | vcpu_run->io.direction, vcpu_run->io.port, vcpu_run->io.size,
                     (uint8_t *)vcpu_run + vcpu_run->io.data_offset);
                 if (!vm_result_check(result))
@@ -1430,7 +1436,7 @@ static void *vm_thread(void *instance0)
             break;
 
         case KVM_EXIT_MMIO:
-            result = instance->config.xmio(instance->config.user_context, vcpu_index,
+            result = instance->config.xmio(instance, vcpu_index,
                 VM_XMIO_MMIO | vcpu_run->mmio.is_write, vcpu_run->mmio.phys_addr, vcpu_run->mmio.len,
                 &vcpu_run->mmio.data);
             break;
@@ -1465,7 +1471,7 @@ exit:
     }
 
     if (has_infi)
-        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
+        instance->config.infi(instance, vcpu_index, -1, result);
 
     pthread_mutex_lock(&instance->thread_lock);
     instance->is_terminated = 1;
@@ -1501,7 +1507,7 @@ exit:
     if (0 == vcpu_index)
     {
         if (has_infi_all)
-            instance->config.infi(instance->config.user_context, ~0ULL, -1,
+            instance->config.infi(instance, ~0ULL, -1,
                 atomic_load(&instance->thread_result));
     }
 
@@ -2171,13 +2177,13 @@ exit:
     return result;
 }
 
-static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_infi(vm_t *instance, vm_count_t vcpu_index,
     int dir, vm_result_t result)
 {
     return VM_RESULT_SUCCESS;
 }
 
-static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     return vm_result(VM_ERROR_VCPU, 0);

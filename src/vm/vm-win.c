@@ -125,9 +125,9 @@ static vm_result_t vm_vcpu_getregs(vm_t *instance, UINT32 vcpu_index, void *buff
 static vm_result_t vm_vcpu_setregs(vm_t *instance, UINT32 vcpu_index, void *buffer, vm_count_t *plength);
 static vm_result_t vm_vcpu_translate(vm_t *instance, UINT32 vcpu_index,
     vm_count_t guest_virtual_address, vm_count_t *pguest_address);
-static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_infi(vm_t *instance, vm_count_t vcpu_index,
     int dir, vm_result_t result);
-static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 static HRESULT CALLBACK vm_emulator_pmio(
     PVOID context,
@@ -463,6 +463,12 @@ vm_result_t vm_delete(vm_t *instance)
     free(instance);
 
     return VM_RESULT_SUCCESS;
+}
+
+VM_API
+void **vm_context(vm_t *instance)
+{
+    return &instance->config.user_context;
 }
 
 VM_API
@@ -966,7 +972,7 @@ vm_result_t vm_interrupt(vm_t *instance,
 
     memset(&interrupt_control, 0, sizeof interrupt_control);
     interrupt_control.Type = WHvX64InterruptTypeFixed;
-    interrupt_control.DestinationMode = WHvX64InterruptDestinationModeLogical;
+    interrupt_control.DestinationMode = WHvX64InterruptDestinationModePhysical;
     interrupt_control.TriggerMode = WHvX64InterruptTriggerModeEdge;
     interrupt_control.Destination = (UINT32)vcpu_index;
     interrupt_control.Vector = (UINT32)vector;
@@ -1393,7 +1399,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
 
     if (0 == vcpu_index)
     {
-        result = instance->config.infi(instance->config.user_context, ~0ULL, +1, VM_RESULT_SUCCESS);
+        result = instance->config.infi(instance, ~0ULL, +1, VM_RESULT_SUCCESS);
         if (!vm_result_check(result))
             goto exit;
         has_infi_all = TRUE;
@@ -1452,7 +1458,7 @@ static DWORD WINAPI vm_thread(PVOID instance0)
     has_debug_log = !!instance->config.logf &&
         0 != (instance->config.log_flags & VM_CONFIG_LOG_HYPERVISOR);
 
-    result = instance->config.infi(instance->config.user_context, vcpu_index, +1, VM_RESULT_SUCCESS);
+    result = instance->config.infi(instance, vcpu_index, +1, VM_RESULT_SUCCESS);
     if (!vm_result_check(result))
         goto exit;
     has_infi = TRUE;
@@ -1552,7 +1558,7 @@ exit:
         InterlockedCompareExchange64(&instance->thread_result, result, VM_RESULT_SUCCESS);
 
     if (has_infi)
-        instance->config.infi(instance->config.user_context, vcpu_index, -1, result);
+        instance->config.infi(instance, vcpu_index, -1, result);
 
     AcquireSRWLockExclusive(&instance->thread_lock);
     instance->is_terminated = 1;
@@ -1580,7 +1586,7 @@ exit:
     if (0 == vcpu_index)
     {
         if (has_infi_all)
-            instance->config.infi(instance->config.user_context, ~0ULL, -1,
+            instance->config.infi(instance, ~0ULL, -1,
                 InterlockedCompareExchange64(&instance->thread_result, ~0LL, ~0LL));
     }
 
@@ -2325,13 +2331,13 @@ exit:
     return result;
 }
 
-static vm_result_t vm_default_infi(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_infi(vm_t *instance, vm_count_t vcpu_index,
     int dir, vm_result_t result)
 {
     return VM_RESULT_SUCCESS;
 }
 
-static vm_result_t vm_default_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_default_xmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     return vm_result(VM_ERROR_VCPU, 0);
@@ -2343,7 +2349,7 @@ static HRESULT CALLBACK vm_emulator_pmio(
 {
     struct vm_emulator_context *context = context0;
     vm_t *instance = context->instance;
-    context->result = instance->config.xmio(instance->config.user_context, context->vcpu_index,
+    context->result = instance->config.xmio(instance, context->vcpu_index,
         VM_XMIO_PMIO | io->Direction, io->Port, io->AccessSize, &io->Data);
     return vm_result_check(context->result) ? S_OK : E_FAIL;
 }
@@ -2354,7 +2360,7 @@ static HRESULT CALLBACK vm_emulator_mmio(
 {
     struct vm_emulator_context *context = context0;
     vm_t *instance = context->instance;
-    context->result = instance->config.xmio(instance->config.user_context, context->vcpu_index,
+    context->result = instance->config.xmio(instance, context->vcpu_index,
         VM_XMIO_MMIO | mmio->Direction, mmio->GpaAddress, mmio->AccessSize, &mmio->Data);
     return vm_result_check(context->result) ? S_OK : E_FAIL;
 }

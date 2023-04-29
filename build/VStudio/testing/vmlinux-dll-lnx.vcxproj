@@ -56,8 +56,10 @@
     <ClInclude Include="..\..\..\tst\vmlinux\plugin.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\tst\vmlinux\ioapic.c" />
     <ClCompile Include="..\..\..\tst\vmlinux\linux.c" />
     <ClCompile Include="..\..\..\tst\vmlinux\plugin.c" />
+    <ClCompile Include="..\..\..\tst\vmlinux\serial.c" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\vm-dll-lnx.vcxproj">

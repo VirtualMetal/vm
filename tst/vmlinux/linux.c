@@ -257,7 +257,9 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance);
 static vm_result_t vm_plugin_linux_setup_page_table(vm_t *instance);
 static vm_result_t vm_plugin_linux_setup_boot_params(vm_t *instance, vm_count_t memory_size);
 static vm_result_t vm_plugin_linux_setup_command_line(vm_t *instance, const char *cmd_line);
-static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_index,
+static vm_result_t vm_plugin_linux_infi(vm_t *instance, vm_count_t vcpu_index,
+    int dir, vm_result_t result);
+static vm_result_t vm_plugin_linux_xmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 
 /* adapted from vm_run: check macro */
@@ -282,6 +284,7 @@ vm_result_t vm_plugin_linux_runcmd(void *context,
 static vm_result_t vm_plugin_linux_runcmd_c(vm_config_t *config,
     vm_runcmd_t *runcmd, char phase, const char *value)
 {
+    config->infi = vm_plugin_linux_infi;
     config->xmio = vm_plugin_linux_xmio;
     config->passthrough = 1;
     return VM_RESULT_SUCCESS;
@@ -372,7 +375,7 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
         .fadt.header.revision = 6,
         .fadt.fadt_minor_version = 4,
         .fadt.iapc_boot_arch = 0x3c,    /* no legacy devs, no 8042, no VGA, no MSI, no ASPM, no CMOS */
-        .fadt.flags = (1 << 20),        /* HW_REDUCED_ACPI */
+        .fadt.flags = 0,
         .fadt.x_dsdt = VM_PLUGIN_LINUX_ACPI_TABLE + (uint64_t)&((struct acpi_table *)0)->dsdt,
         .fadt.hypervisor_vendor_identity = "VrtMetal",
         /* DSDT */
@@ -387,6 +390,7 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
     {
         struct acpi_madt base;
         struct acpi_wakeup wakeup;
+        struct acpi_ioapic ioapic;
         struct acpi_lapic lapic[VM_CONFIG_VCPU_COUNT_MAX];
     }) madt;
 
@@ -427,11 +431,16 @@ static vm_result_t vm_plugin_linux_setup_acpi_table(vm_t *instance)
     madt.base.header.length = (uint32_t)(
         (uint8_t *)&madt.lapic[config.vcpu_count] - (uint8_t *)&madt.base);
     madt.base.header.revision = 5;
-    madt.base.lapic_address = 0xFEE00000;   /* !!!: REVISIT */
+    madt.base.lapic_address = 0xFEE00000;
     madt.wakeup.type = 0x10;            /* multiprocessor wakeup */
     madt.wakeup.length = sizeof madt.wakeup;
     madt.wakeup.mailbox_version = 0;
     madt.wakeup.mailbox_address = VM_PLUGIN_LINUX_MAILBOX;
+    madt.ioapic.type = 1;               /* I/O APIC */
+    madt.ioapic.length = sizeof madt.ioapic;
+    madt.ioapic.ioapic_id = (uint8_t)config.vcpu_count;
+    madt.ioapic.ioapic_address = 0xFEC00000;
+    madt.ioapic.gsi_base = 0;
     for (vm_count_t index = 0; config.vcpu_count > index; index++)
     {
         madt.lapic[index].type = 0;     /* processor local apic */
@@ -590,24 +599,74 @@ exit:
 
 #undef CHK
 
-static vm_result_t vm_plugin_linux_xmio(void *user_context, vm_count_t vcpu_index,
+struct vm_plugin_linux_data
+{
+    ioapic_t *apic;
+    serial_t *port;
+};
+
+static vm_result_t vm_plugin_linux_infi(vm_t *instance, vm_count_t vcpu_index,
+    int dir, vm_result_t result)
+{
+    if (~0ULL != vcpu_index)
+        return VM_RESULT_SUCCESS;
+
+    struct vm_plugin_linux_data *data = 0;
+
+    if (+1 == dir)
+    {
+        data = malloc(sizeof *data);
+        if (0 == data)
+        {
+            result = vm_result(VM_ERROR_RESOURCES, 0);
+            goto exit;
+        }
+
+        result = ioapic_create(instance, &data->apic);
+        if (!vm_result_check(result))
+            goto exit;
+
+        int fd[2] = { STDIN_FILENO, STDOUT_FILENO };
+        result = serial_create(fd, data->apic, 4, &data->port);
+        if (!vm_result_check(result))
+            goto exit;
+
+        *vm_context(instance) = data;
+        data = 0;
+    }
+    else
+    if (-1 == dir)
+        data = *vm_context(instance);
+
+    result = VM_RESULT_SUCCESS;
+
+exit:
+    if (0 != data)
+    {
+        if (0 != data->port)
+            serial_delete(data->port);
+
+        if (0 != data->apic)
+            ioapic_delete(data->apic);
+
+        free(data);
+    }
+
+    return result;
+}
+
+static vm_result_t vm_plugin_linux_xmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     if (VM_XMIO_RD == VM_XMIO_DIR(flags))
         memset(buffer, 0, length);
 
-    if (VM_XMIO_PMIO == VM_XMIO_KIND(flags))
-        switch (address)
-        {
-        case 0x3f8:
-            if (VM_XMIO_WR == VM_XMIO_DIR(flags))
-                write(STDOUT_FILENO, buffer, 1);
-            break;
-        case 0x3f8 + 5: /* Line Status Register */
-            if (VM_XMIO_RD == VM_XMIO_DIR(flags))
-                *(uint8_t *)buffer = 0x60;  // indicate transmission buffer empty
-            break;
-        }
+    struct vm_plugin_linux_data *data = *vm_context(instance);
+
+    if (VM_XMIO_MMIO == VM_XMIO_KIND(flags) && 0xff >= address - 0xFEC00000)
+        ioapic_io(data->apic, flags, address, buffer);
+    else if (VM_XMIO_PMIO == VM_XMIO_KIND(flags) && 7 >= address - 0x3f8 && 1 == length)
+        serial_io(data->port, flags, address, buffer);
 
     return VM_RESULT_SUCCESS;
 }
