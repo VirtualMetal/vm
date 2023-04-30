@@ -81,10 +81,12 @@ struct vm_config
     /* interface */
     vm_result_t (*infi)(vm_t *instance, vm_count_t vcpu_index,
         int dir, vm_result_t result);
-    vm_result_t (*xmio)(vm_t *instance, vm_count_t vcpu_index,
+    vm_result_t (*mmio)(vm_t *instance, vm_count_t vcpu_index,
+        vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
+    vm_result_t (*pmio)(vm_t *instance, vm_count_t vcpu_index,
         vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
     void (*logf)(const char *format, ...);
-    vm_count_t reserved0[13];
+    vm_count_t reserved0[12];
 
     /* immutable */
     vm_count_t log_flags;
@@ -123,9 +125,6 @@ VM_STATIC_ASSERT(512 == sizeof(struct vm_config));
 #define VM_XMIO_RD                      0
 #define VM_XMIO_WR                      1
 #define VM_XMIO_DIR(F)                  ((F) & 1)
-#define VM_XMIO_MMIO                    0
-#define VM_XMIO_PMIO                    2
-#define VM_XMIO_KIND(F)                 ((F) & 2)
 
 struct vm_runcmd
 {

@@ -213,8 +213,10 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->config = *config;
     if (0 == instance->config.infi)
         instance->config.infi = vm_default_infi;
-    if (0 == instance->config.xmio)
-        instance->config.xmio = vm_default_xmio;
+    if (0 == instance->config.mmio)
+        instance->config.mmio = vm_default_xmio;
+    if (0 == instance->config.pmio)
+        instance->config.pmio = vm_default_xmio;
     instance->config.vcpu_count = vcpu_count;
     instance->hv_fd = -1;
     instance->vm_fd = -1;
@@ -1427,8 +1429,8 @@ static void *vm_thread(void *instance0)
         case KVM_EXIT_IO:
             for (__u32 index = 0; vcpu_run->io.count > index; index++)
             {
-                result = instance->config.xmio(instance, vcpu_index,
-                    VM_XMIO_PMIO | vcpu_run->io.direction, vcpu_run->io.port, vcpu_run->io.size,
+                result = instance->config.pmio(instance, vcpu_index,
+                    vcpu_run->io.direction, vcpu_run->io.port, vcpu_run->io.size,
                     (uint8_t *)vcpu_run + vcpu_run->io.data_offset);
                 if (!vm_result_check(result))
                     break;
@@ -1436,8 +1438,8 @@ static void *vm_thread(void *instance0)
             break;
 
         case KVM_EXIT_MMIO:
-            result = instance->config.xmio(instance, vcpu_index,
-                VM_XMIO_MMIO | vcpu_run->mmio.is_write, vcpu_run->mmio.phys_addr, vcpu_run->mmio.len,
+            result = instance->config.mmio(instance, vcpu_index,
+                vcpu_run->mmio.is_write, vcpu_run->mmio.phys_addr, vcpu_run->mmio.len,
                 &vcpu_run->mmio.data);
             break;
 

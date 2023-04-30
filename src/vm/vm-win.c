@@ -296,8 +296,10 @@ vm_result_t vm_create(const vm_config_t *config, vm_t **pinstance)
     instance->config = *config;
     if (0 == instance->config.infi)
         instance->config.infi = vm_default_infi;
-    if (0 == instance->config.xmio)
-        instance->config.xmio = vm_default_xmio;
+    if (0 == instance->config.mmio)
+        instance->config.mmio = vm_default_xmio;
+    if (0 == instance->config.pmio)
+        instance->config.pmio = vm_default_xmio;
     instance->config.vcpu_count = vcpu_count;
     InitializeSRWLock(&instance->mmap_lock);
     list_init(&instance->mmap_list);
@@ -2349,8 +2351,8 @@ static HRESULT CALLBACK vm_emulator_pmio(
 {
     struct vm_emulator_context *context = context0;
     vm_t *instance = context->instance;
-    context->result = instance->config.xmio(instance, context->vcpu_index,
-        VM_XMIO_PMIO | io->Direction, io->Port, io->AccessSize, &io->Data);
+    context->result = instance->config.pmio(instance, context->vcpu_index,
+        io->Direction, io->Port, io->AccessSize, &io->Data);
     return vm_result_check(context->result) ? S_OK : E_FAIL;
 }
 
@@ -2360,8 +2362,8 @@ static HRESULT CALLBACK vm_emulator_mmio(
 {
     struct vm_emulator_context *context = context0;
     vm_t *instance = context->instance;
-    context->result = instance->config.xmio(instance, context->vcpu_index,
-        VM_XMIO_MMIO | mmio->Direction, mmio->GpaAddress, mmio->AccessSize, &mmio->Data);
+    context->result = instance->config.mmio(instance, context->vcpu_index,
+        mmio->Direction, mmio->GpaAddress, mmio->AccessSize, &mmio->Data);
     return vm_result_check(context->result) ? S_OK : E_FAIL;
 }
 

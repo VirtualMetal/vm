@@ -259,7 +259,9 @@ static vm_result_t vm_plugin_linux_setup_boot_params(vm_t *instance, vm_count_t 
 static vm_result_t vm_plugin_linux_setup_command_line(vm_t *instance, const char *cmd_line);
 static vm_result_t vm_plugin_linux_infi(vm_t *instance, vm_count_t vcpu_index,
     int dir, vm_result_t result);
-static vm_result_t vm_plugin_linux_xmio(vm_t *instance, vm_count_t vcpu_index,
+static vm_result_t vm_plugin_linux_mmio(vm_t *instance, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
+static vm_result_t vm_plugin_linux_pmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer);
 
 /* adapted from vm_run: check macro */
@@ -285,7 +287,8 @@ static vm_result_t vm_plugin_linux_runcmd_c(vm_config_t *config,
     vm_runcmd_t *runcmd, char phase, const char *value)
 {
     config->infi = vm_plugin_linux_infi;
-    config->xmio = vm_plugin_linux_xmio;
+    config->mmio = vm_plugin_linux_mmio;
+    config->pmio = vm_plugin_linux_pmio;
     config->passthrough = 1;
     return VM_RESULT_SUCCESS;
 }
@@ -655,7 +658,7 @@ exit:
     return result;
 }
 
-static vm_result_t vm_plugin_linux_xmio(vm_t *instance, vm_count_t vcpu_index,
+static vm_result_t vm_plugin_linux_mmio(vm_t *instance, vm_count_t vcpu_index,
     vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
 {
     if (VM_XMIO_RD == VM_XMIO_DIR(flags))
@@ -663,9 +666,21 @@ static vm_result_t vm_plugin_linux_xmio(vm_t *instance, vm_count_t vcpu_index,
 
     struct vm_plugin_linux_data *data = *vm_context(instance);
 
-    if (VM_XMIO_MMIO == VM_XMIO_KIND(flags) && 0xff >= address - 0xFEC00000)
+    if (0xff >= address - 0xFEC00000)
         ioapic_io(data->apic, flags, address, buffer);
-    else if (VM_XMIO_PMIO == VM_XMIO_KIND(flags) && 7 >= address - 0x3f8 && 1 == length)
+
+    return VM_RESULT_SUCCESS;
+}
+
+static vm_result_t vm_plugin_linux_pmio(vm_t *instance, vm_count_t vcpu_index,
+    vm_count_t flags, vm_count_t address, vm_count_t length, void *buffer)
+{
+    if (VM_XMIO_RD == VM_XMIO_DIR(flags))
+        memset(buffer, 0, length);
+
+    struct vm_plugin_linux_data *data = *vm_context(instance);
+
+    if (7 >= address - 0x3f8 && 1 == length)
         serial_io(data->port, flags, address, buffer);
 
     return VM_RESULT_SUCCESS;
